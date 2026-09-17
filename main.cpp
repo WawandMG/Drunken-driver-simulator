@@ -1,7 +1,7 @@
-#include <iostream>
+#include "app.h"
 
 int main() {
-    std::cout << "Hello world!\n";
+    app::run();
     // Misha branch
     return 0;
 }
