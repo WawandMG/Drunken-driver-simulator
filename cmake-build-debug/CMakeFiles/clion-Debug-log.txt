@@ -1,0 +1,14 @@
+/Applications/CLion.app/Contents/bin/cmake/mac/aarch64/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=/Applications/CLion.app/Contents/bin/ninja/mac/aarch64/ninja -G Ninja -S /Users/danilamalyshev/CLionProjects/Drunken-driver-simulator -B /Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/cmake-build-debug
+-- Found SFML 3.0.2 in /opt/homebrew/lib/cmake/SFML
+-- Configuring done (0.0s)
+CMake Error at CMakeLists.txt:11 (add_executable):
+  Cannot find source file:
+
+    object.cpp
+
+
+CMake Error at CMakeLists.txt:11 (add_executable):
+  No SOURCES given to target: app
+
+
+CMake Generate step failed.  Build files cannot be regenerated correctly.
