@@ -20,6 +20,7 @@ namespace config {
 
 }
 
+using namespace std;
 
 // Пространство имён для описания классов используемых в проекте
 namespace obj {
@@ -74,8 +75,20 @@ namespace obj {
 
     // Класс машины, набросок
     class Car : public Entity {
+        public:
+            Car() {
+                SetSpeedLimit(120);
 
+                float default_speed = GenFloat(30, 120);
+                SetSpeed(default_speed);
+
+                float dist = GetSpeedLimit() - default_speed;
+                float default_acceleration = GenFloat(0, dist);
+                SetAcceleration(default_acceleration);
+            }
     };
+
+
     // Класс пешехода, набросок
     class Pedestrian : public Entity {
         public:
@@ -92,7 +105,7 @@ namespace obj {
     };
 
 
-    // Класс для статических объектов 
+    // Класс для статических объектов
     class Static_entity {
         sf::Vector2f Pos; //позиция на экране
 
