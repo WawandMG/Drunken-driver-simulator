@@ -1,3 +1,0 @@
-/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/cmake-build-debug/CMakeFiles/app.dir
-/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/cmake-build-debug/CMakeFiles/edit_cache.dir
-/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/cmake-build-debug/CMakeFiles/rebuild_cache.dir
