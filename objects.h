@@ -104,7 +104,7 @@ namespace obj {
         sf::Vector2f Pos;//позиция на экране
 
     };
-
+    
     class Road : Static_entity {
     private:
         int type = 0;// будет 4 дороги - все они разные по направлению, то есть у каждой свой тип
