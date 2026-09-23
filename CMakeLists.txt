@@ -8,7 +8,7 @@ find_package(SFML 3.0 COMPONENTS Graphics Window System REQUIRED)
 
 find_package(ImGui-SFML REQUIRED)
 
-add_executable(${PROJECT_NAME} main.cpp app.cpp object.cpp)
+add_executable(${PROJECT_NAME} main.cpp app.cpp objects.cpp)
 
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
