@@ -1,2 +1,7 @@
 build/
 .idea/
+documentaion.aux
+documentaion.log
+documentaion.out
+documentaion.pdf
+documentaion.synctex.gz

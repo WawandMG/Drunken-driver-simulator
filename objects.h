@@ -36,9 +36,23 @@ namespace config {
     inline constexpr float Waypoint_step_m = 10.f;
     inline constexpr float Waypoint_reach_m = 1.0f; // Расстояние на котором машина считает, что достигла waypoint
     inline constexpr float Light_clearance_m = 5.0f; // от границы перекрёстка до светофора
-    inline constexpr float Green_s = 12.0f;
-    inline constexpr float Yellow_s = 3.0f;
-    inline constexpr float Walk_s = 12.0f;
+    inline float Green_s = 12.0f;
+    inline float Yellow_s = 3.0f;
+    inline float Static_red_s = 12.0f;
+    inline float Signal_visibility_m = 30.0f;
+    inline float Vehicle_speed_min_kmh = 30.0f;
+    inline float Vehicle_speed_max_kmh = 120.0f;
+    inline float Car_arrival_min_s = 4.0f;
+    inline float Car_arrival_max_s = 8.0f;
+    inline constexpr float Automatic_min_green_s = 5.0f;
+    inline constexpr float Automatic_max_green_s = 30.0f;
+    inline constexpr float Automatic_seconds_per_waiting_car = 1.5f;
+    inline constexpr float Automatic_yellow_s = 3.0f;
+    inline constexpr float Automatic_min_walk_s = 5.0f;
+    inline constexpr float Automatic_max_walk_s = 24.0f;
+    inline constexpr float Automatic_seconds_per_waiting_pedestrian = 1.5f;
+    inline constexpr float Pedestrian_arrival_min_s = 2.5f;
+    inline constexpr float Pedestrian_arrival_max_s = 7.0f;
     enum class direction {
         North = 0,  // Дорога направлена наверх
         South = 1,  // Дорога направлена вниз
@@ -145,9 +159,15 @@ namespace obj {
             int StopAt() const { return own_stop; }
 
             Car() {
-                SetSpeedLimit(120);
+                const float min_speed = std::min(
+                    config::Vehicle_speed_min_kmh,
+                    config::Vehicle_speed_max_kmh);
+                const float max_speed = std::max(
+                    config::Vehicle_speed_min_kmh,
+                    config::Vehicle_speed_max_kmh);
+                SetSpeedLimit(GenFloat(min_speed, max_speed));
 
-                float default_speed = GenFloat(30, 120);
+                float default_speed = GenFloat(min_speed, GetSpeedLimit());
                 SetSpeed(default_speed);
 
                 float dist = GetSpeedLimit() - default_speed;
@@ -409,9 +429,15 @@ namespace obj {
 
 
     inline Car::Car(Lane* lane_pointer) {
-        SetSpeedLimit(120);
+        const float min_speed = std::min(
+            config::Vehicle_speed_min_kmh,
+            config::Vehicle_speed_max_kmh);
+        const float max_speed = std::max(
+            config::Vehicle_speed_min_kmh,
+            config::Vehicle_speed_max_kmh);
+        SetSpeedLimit(GenFloat(min_speed, max_speed));
 
-        float default_speed = GenFloat(30, 120);
+        float default_speed = GenFloat(min_speed, GetSpeedLimit());
         SetSpeed(default_speed);
 
         float dist = GetSpeedLimit() - default_speed;
@@ -557,22 +583,26 @@ namespace obj {
         bool wait = false;
         if (waypoint_i >= stop_i && lane->GetLight() != nullptr) {
             float dist_stop = get_distance(Pos, waypoints[stop_i]);
-            Signal sig = lane->CurrentSignal();
-            // зелёный круг: прямо и направо. зелёная стрелка: только налево
-            bool go = false;
-            if (turn == 2) {
-                if (sig == Signal::GreenLeft) {
+            if (dist_stop <= Meters_to_Px(config::Signal_visibility_m)) {
+                Signal sig = lane->CurrentSignal();
+                // зелёный круг: прямо и направо. зелёная стрелка: только налево
+                bool go = false;
+                if (turn == 2) {
+                    if (sig == Signal::GreenLeft) {
+                        go = true;
+                    } else if (sig == Signal::YellowLeft &&
+                               dist_stop <= Meters_to_Px(6.0f)) {
+                        go = true;
+                    }
+                } else if (sig == Signal::Green) {
                     go = true;
-                } else if (sig == Signal::YellowLeft && dist_stop <= Meters_to_Px(6.0f)) {
+                } else if (sig == Signal::Yellow &&
+                           dist_stop <= Meters_to_Px(6.0f)) {
                     go = true;
                 }
-            } else if (sig == Signal::Green) {
-                go = true;
-            } else if (sig == Signal::Yellow && dist_stop <= Meters_to_Px(6.0f)) {
-                go = true;
-            }
-            if (!go) {
-                wait = true;
+                if (!go) {
+                    wait = true;
+                }
             }
             if (turn == 2 && lane->YieldNow()) {
                 wait = true;
@@ -832,14 +862,14 @@ namespace obj {
                 return false;
             }
 
-            void Spawn() {
+            bool Spawn() {
                 bool flip = Gen(0, 1) == 1;
                 sf::Vector2f start = flip ? to : from;
                 sf::Vector2f end = flip ? from : to;
                 sf::Vector2f dir = end - start;
                 float len = std::sqrt(dir.x * dir.x + dir.y * dir.y);
                 if (len < 1.0f) {
-                    return;
+                    return false;
                 }
                 dir.x /= len;
                 dir.y /= len;
@@ -855,12 +885,13 @@ namespace obj {
                         continue;
                     }
                     if (get_distance(other->GetPos(), start) < gap) {
-                        return;
+                        return false;
                     }
                 }
                 Pedestrian* ped = new Pedestrian();
                 ped->SetPath(start, end);
                 people.push_back(ped);
+                return true;
             }
 
             void Update(float dt) {
@@ -896,7 +927,40 @@ namespace obj {
             std::vector<Crosswalk> walks;
             float phase_time = 0.0f;
             float walk_spawn = 0.0f;
+            float car_spawn_elapsed = 0.0f;
+            float next_car_arrival =
+                GenFloat(config::Car_arrival_min_s, config::Car_arrival_max_s);
+            bool automatic_signals = false;
+            int waiting_pedestrians = 0;
+            float pedestrian_arrival_elapsed = 0.0f;
+            float next_pedestrian_arrival =
+                GenFloat(config::Pedestrian_arrival_min_s, config::Pedestrian_arrival_max_s);
             int phase = 0; // на каждую ось: прямо+направо, жёлтый, налево, жёлтый, потом пешеходы
+
+            // A shared randomized interval keeps all four approaches in sync.
+            void SpawnOneCarPerRoad() {
+                for (int r = 0; r < roads.size(); ++r) {
+                    if (!roads[r]) {
+                        continue;
+                    }
+                    const std::vector<Lane*>& lanes = roads[r]->GetLanes();
+                    const int inbound_lanes = static_cast<int>(lanes.size()) / 2;
+                    if (inbound_lanes <= 0) {
+                        continue;
+                    }
+
+                    const int first_lane = Gen(0, inbound_lanes - 1);
+                    for (int offset = 0; offset < inbound_lanes; ++offset) {
+                        const int lane_index = (first_lane + offset) % inbound_lanes;
+                        Lane* lane = lanes[lane_index];
+                        if (!lane || !lane->HasRoom()) {
+                            continue;
+                        }
+                        lane->Car_push(new Car(lane));
+                        break;
+                    }
+                }
+            }
 
             bool CarOnWalk(const Crosswalk& walk) const {
                 sf::Vector2f a = walk.From();
@@ -935,6 +999,78 @@ namespace obj {
                     }
                 }
                 return false;
+            }
+
+            int CountWaitingCarsOnAxis(bool north_south) const {
+                int count = 0;
+                for (int r = 0; r < roads.size(); ++r) {
+                    if ((r >= 2) != north_south || !roads[r]) {
+                        continue;
+                    }
+                    const std::vector<Lane*>& lanes = roads[r]->GetLanes();
+                    const int approach_lanes = static_cast<int>(lanes.size()) / 2;
+                    for (int i = 0; i < approach_lanes; ++i) {
+                        if (!lanes[i]) {
+                            continue;
+                        }
+                        const std::vector<Car*>& cars = lanes[i]->GetCars();
+                        for (int c = 0; c < cars.size(); ++c) {
+                            const Car* car = cars[c];
+                            if (car && car->IsAlive() &&
+                                car->WaypointIndex() >= car->StopAt()) {
+                                ++count;
+                            }
+                        }
+                    }
+                }
+                return count;
+            }
+
+            int CountWaitingCarsForActivePhase() const {
+                if (phase >= 8) {
+                    return 0;
+                }
+                const bool north_south = phase < 4;
+                const bool left_turn_phase = phase % 4 == 2;
+                int count = 0;
+                for (int r = 0; r < roads.size(); ++r) {
+                    if ((r >= 2) != north_south || !roads[r]) {
+                        continue;
+                    }
+                    const std::vector<Lane*>& lanes = roads[r]->GetLanes();
+                    const int approach_lanes = static_cast<int>(lanes.size()) / 2;
+                    for (int i = 0; i < approach_lanes; ++i) {
+                        const bool is_left_turn_lane = i == approach_lanes - 1;
+                        if (left_turn_phase != is_left_turn_lane || !lanes[i]) {
+                            continue;
+                        }
+                        const std::vector<Car*>& cars = lanes[i]->GetCars();
+                        for (int c = 0; c < cars.size(); ++c) {
+                            const Car* car = cars[c];
+                            if (car && car->IsAlive() &&
+                                car->WaypointIndex() >= car->StopAt()) {
+                                ++count;
+                            }
+                        }
+                    }
+                }
+                return count;
+            }
+
+            float AutomaticGreenLimit() const {
+                const float demand = static_cast<float>(CountWaitingCarsForActivePhase());
+                return std::min(
+                    config::Automatic_max_green_s,
+                    config::Automatic_min_green_s +
+                        demand * config::Automatic_seconds_per_waiting_car);
+            }
+
+            float AutomaticWalkLimit() const {
+                const float demand = static_cast<float>(waiting_pedestrians);
+                return std::min(
+                    config::Automatic_max_walk_s,
+                    config::Automatic_min_walk_s +
+                        demand * config::Automatic_seconds_per_waiting_pedestrian);
             }
 
             void BuildWalks() {
@@ -1142,20 +1278,57 @@ namespace obj {
                 lights.push_back(TrafficLight(sf::Vector2f(d, d), sf::Vector2f(0.f, 1.f)));
                 lights.push_back(TrafficLight(sf::Vector2f(-d, d), sf::Vector2f(-1.f, 0.f)));
                 lights.push_back(TrafficLight(sf::Vector2f(d, -d), sf::Vector2f(1.f, 0.f)));
+                car_spawn_elapsed = 0.0f;
+                next_car_arrival = GenFloat(
+                    config::Car_arrival_min_s,
+                    config::Car_arrival_max_s);
                 ApplySignals();
                 Connect();
                 BuildWalks();
+                SpawnOneCarPerRoad();
             }
             void Update(float dt) {
                 for(int i = 0;i < roads.size();i++) {
                     roads[i]->Update(dt);
                 }
+                car_spawn_elapsed += dt;
+                while (car_spawn_elapsed >= next_car_arrival) {
+                    car_spawn_elapsed -= next_car_arrival;
+                    SpawnOneCarPerRoad();
+                    next_car_arrival = GenFloat(
+                        config::Car_arrival_min_s,
+                        config::Car_arrival_max_s);
+                }
                 for (int i = 0; i < walks.size(); ++i) {
                     walks[i].Update(dt);
                 }
+                if (automatic_signals && phase != 8) {
+                    pedestrian_arrival_elapsed += dt;
+                    while (pedestrian_arrival_elapsed >= next_pedestrian_arrival) {
+                        pedestrian_arrival_elapsed -= next_pedestrian_arrival;
+                        ++waiting_pedestrians;
+                        next_pedestrian_arrival =
+                            GenFloat(config::Pedestrian_arrival_min_s,
+                                     config::Pedestrian_arrival_max_s);
+                    }
+                }
                 if (phase == 8) {
                     phase_time += dt;
-                    if (phase_time < config::Walk_s) {
+                    if (automatic_signals) {
+                        walk_spawn += dt;
+                        if (walk_spawn >= 1.2f && waiting_pedestrians > 0 &&
+                            !walks.empty()) {
+                            walk_spawn = 0.0f;
+                            const int start = Gen(0, static_cast<int>(walks.size()) - 1);
+                            for (int offset = 0; offset < walks.size(); ++offset) {
+                                const int r = (start + offset) % walks.size();
+                                if (!CarOnWalk(walks[r]) && walks[r].Spawn()) {
+                                    --waiting_pedestrians;
+                                    break;
+                                }
+                            }
+                        }
+                    } else if (phase_time < config::Static_red_s) {
                         walk_spawn += dt;
                         if (walk_spawn >= 1.2f && walks.size() > 0) {
                             walk_spawn = 0.0f;
@@ -1171,7 +1344,12 @@ namespace obj {
                             busy = true;
                         }
                     }
-                    if (phase_time >= config::Walk_s && !busy) {
+                    const float walk_limit = automatic_signals
+                        ? AutomaticWalkLimit()
+                        : config::Static_red_s;
+                    const bool pedestrians_cleared =
+                        !automatic_signals || waiting_pedestrians == 0;
+                    if (phase_time >= walk_limit && pedestrians_cleared && !busy) {
                         phase_time = 0.0f;
                         walk_spawn = 0.0f;
                         phase = 0;
@@ -1180,21 +1358,55 @@ namespace obj {
                     return;
                 }
                 phase_time += dt;
-                float limit = (phase % 2 == 0) ? config::Green_s : config::Yellow_s;
-                if (phase_time >= limit) {
+                float limit = (phase % 2 == 0)
+                    ? config::Green_s
+                    : (automatic_signals
+                        ? config::Automatic_yellow_s
+                        : config::Yellow_s);
+                bool advance_early_for_demand = false;
+                if (automatic_signals && phase % 2 == 0) {
+                    limit = AutomaticGreenLimit();
+                    const bool north_south = phase < 4;
+                    const int other_axis_demand =
+                        CountWaitingCarsOnAxis(!north_south);
+                    advance_early_for_demand =
+                        phase_time >= config::Automatic_min_green_s &&
+                        CountWaitingCarsForActivePhase() == 0 &&
+                        other_axis_demand > 0;
+                }
+                if (phase_time >= limit || advance_early_for_demand) {
                     phase_time = 0.0f;
                     phase = (phase + 1) % 9;
                     walk_spawn = 0.0f;
                     if (phase == 8) {
-                        for (int i = 0; i < walks.size(); ++i) {
-                            if (!CarOnWalk(walks[i])) {
-                                walks[i].Spawn();
+                        if (!automatic_signals) {
+                            for (int i = 0; i < walks.size(); ++i) {
+                                if (!CarOnWalk(walks[i])) {
+                                    walks[i].Spawn();
+                                }
                             }
                         }
                     }
                     ApplySignals();
                 }
             }
+            void SetAutomaticSignals(bool enabled) {
+                if (automatic_signals == enabled) {
+                    return;
+                }
+                automatic_signals = enabled;
+                phase_time = 0.0f;
+                walk_spawn = 0.0f;
+                pedestrian_arrival_elapsed = 0.0f;
+                if (!automatic_signals) {
+                    waiting_pedestrians = 0;
+                }
+            }
+            bool AutomaticSignals() const { return automatic_signals; }
+            int WaitingVehiclesForActivePhase() const {
+                return CountWaitingCarsForActivePhase();
+            }
+            int WaitingPedestrians() const { return waiting_pedestrians; }
             bool WalkNow() const { return phase == 8; }
             const std::vector<Crosswalk>& GetWalks() const { return walks; }
             const std::vector<Road*>& Get_roads() {

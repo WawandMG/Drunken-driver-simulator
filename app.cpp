@@ -7,7 +7,6 @@ void app::run() {
     sf::RenderWindow window(sf::VideoMode({app::SCREEN_WIDTH, app::SCREEN_HEIGHT}), "App");
     window.setFramerateLimit(60);
 
-
     // 1. Инициализация ImGui для SFML
     if (!ImGui::SFML::Init(window)) {
         // Если инициализация провалилась, выходим или логируем ошибку
@@ -18,6 +17,13 @@ void app::run() {
     World.Build();
     sf::Clock deltaClock; // Часы для измерения времени между кадрами
 
+    background_manager Back;
+    Back.Init_textures();
+    sf::Texture tttxxxttt;
+    tttxxxttt.loadFromFile("../assets/goose.jpg");
+    sf::Sprite Background(tttxxxttt);
+    
+    Back.Get_background(Background);
     while (window.isOpen()) {
         // 2. Обработка событий SFML 3.0
         // В SFML 3.0 pollEvent возвращает std::optional<sf::Event>
@@ -26,22 +32,82 @@ void app::run() {
                 window.close();
             }
             
+
             // Передаем событие в ImGui, чтобы он понимал клики и клавиши
             ImGui::SFML::ProcessEvent(window, *event);
         }
 
-        // 3. Обновление ImGui (передаем дельту времени!)
+        // 3. Обновление ImGui 
         sf::Time dt = deltaClock.restart();
         ImGui::SFML::Update(window, dt);
 
-        // --- ТВОЙ ИГРОВОЙ КОД ---
-        // Логика игры, обновление позиций и т.д.
 
         // --- РИСОВАНИЕ ---
         World.Update(dt.asSeconds());
 
-        ImGui::Begin("bebe");
-            ImGui::Text("Some test text");
+        ImGui::SetNextWindowSize({390, 590}, ImGuiCond_FirstUseEver);
+        ImGui::Begin("Simulation controls", nullptr, ImGuiWindowFlags_NoMove);
+            int signal_mode = World.AutomaticSignals() ? 1 : 0;
+            if (ImGui::Combo("Signal mode", &signal_mode,
+                    "Static preset\0Automatic\0")) {
+                World.SetAutomaticSignals(signal_mode == 1);
+            }
+            ImGui::Separator();
+            if (!World.AutomaticSignals()) {
+                ImGui::Text("Static signal timing");
+                ImGui::SliderFloat(
+                    "Green duration (s)", &config::Green_s, 1.0f, 90.0f, "%.1f");
+                ImGui::SliderFloat(
+                    "Yellow duration (s)", &config::Yellow_s, 1.0f, 15.0f, "%.1f");
+                ImGui::SliderFloat(
+                    "Red / walk duration (s)", &config::Static_red_s,
+                    1.0f, 90.0f, "%.1f");
+            } else {
+                ImGui::TextWrapped(
+                    "Static color durations apply only in Static preset mode.");
+            }
+
+            ImGui::Separator();
+            ImGui::Text("Traffic parameters");
+            ImGui::SliderFloat(
+                "Signal visibility (m)", &config::Signal_visibility_m,
+                5.0f, 100.0f, "%.1f");
+
+            float min_speed = config::Vehicle_speed_min_kmh;
+            if (ImGui::SliderFloat(
+                    "Minimum car speed (km/h)", &min_speed,
+                    5.0f, 160.0f, "%.0f")) {
+                config::Vehicle_speed_min_kmh = min_speed;
+                if (config::Vehicle_speed_max_kmh < min_speed) {
+                    config::Vehicle_speed_max_kmh = min_speed;
+                }
+            }
+            ImGui::SliderFloat(
+                "Maximum car speed (km/h)", &config::Vehicle_speed_max_kmh,
+                config::Vehicle_speed_min_kmh, 160.0f, "%.0f");
+
+            float min_arrival = config::Car_arrival_min_s;
+            if (ImGui::SliderFloat(
+                    "Minimum spawn interval (s)", &min_arrival,
+                    1.0f, 30.0f, "%.1f")) {
+                config::Car_arrival_min_s = min_arrival;
+                if (config::Car_arrival_max_s < min_arrival) {
+                    config::Car_arrival_max_s = min_arrival;
+                }
+            }
+            ImGui::SliderFloat(
+                "Maximum spawn interval (s)", &config::Car_arrival_max_s,
+                config::Car_arrival_min_s, 60.0f, "%.1f");
+            ImGui::TextWrapped(
+                "Each randomized arrival cycle adds one car to every road.");
+
+            ImGui::Separator();
+            ImGui::Text("Vehicles in active queue: %d",
+                World.WaitingVehiclesForActivePhase());
+            if (World.AutomaticSignals()) {
+                ImGui::Text("Pedestrians waiting: %d",
+                    World.WaitingPedestrians());
+            }
             if (ImGui::Button("Add car")) {
                 const std::vector<obj::Road*>& roads = World.Get_roads();
                 for (int r = 0; r < roads.size(); ++r) {
@@ -57,21 +123,21 @@ void app::run() {
                     }
                 }
             }
+            if (ImGui::Button("Next background")) {
+                Back.Next_background(Background);
+
+            }
         ImGui::End();
 
 
-        app::Render_world(window, World);
-        // Рисуем игровые объекты (спрайты, фигуры)
-        // window.draw(mySprite);
+        app::Render_world(window, World, Background);
 
         // 4. Рендер ImGui (поверх всего, что нарисовано в window)
         ImGui::SFML::Render(window);
-
-        // 5. Вывод на экран
+        window.resetGLStates();
         window.display();
     }
 
-    // 6. Очистка памяти
     ImGui::SFML::Shutdown();
 }   
 
@@ -383,13 +449,21 @@ void app::Render_crossroad(sf::RenderWindow& window,const obj::Crossroad* crossr
 }
 
 
-void app::Render_world(sf::RenderWindow& window, obj::World& world) {
+void app::Render_world(sf::RenderWindow& window, obj::World& world, sf::Sprite& Backgorund) {
     window.clear(colors::Background);
+    window.draw(Backgorund);
+
+    sf::RectangleShape rect;
+    rect.setPosition({470, 272});
+    rect.setSize({735 - 475, 527 - 272});
+    rect.setFillColor(colors::Background);
+    window.draw(rect);
 
     const std::vector<obj::Road*>& roads = world.Get_roads();
     for (int i = 0; i < roads.size(); ++i) {
         Render_crossing(window, roads[i]);
     }
+    //window.draw(Backgorund);
 
     sf::Vector2f box_a;
     sf::Vector2f box_b;

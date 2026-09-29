@@ -41,5 +41,49 @@ namespace app {
     void Render_light(sf::RenderWindow& window, const obj::TrafficLight& light);
     void Render_pedestrian(sf::RenderWindow& window, const obj::Pedestrian* ped);
     void Render_crossroad(sf::RenderWindow& window, const obj::Crossroad* crossroad);
-    void Render_world(sf::RenderWindow& window, obj::World& world);
+    void Render_world(sf::RenderWindow& window, obj::World& world, sf::Sprite& Background);
 }
+
+
+class background_manager {
+    private:
+    int Current_texture = 0;
+    std::vector<std::string> names = {
+        "None",
+        "no name"
+    };
+    std::vector<std::string> paths = {
+        "../assets/Surgut.jpg",
+        "../assets/goose.jpg",
+        "../assets/hell_peter.jpg",
+        "../assets/paris.jpeg"
+    };
+
+    std::vector<sf::Texture> textures;
+
+    public:
+    void Init_textures() {
+        Current_texture = 0;
+        textures.resize(paths.size()); 
+        sf::Texture texture_buffer;
+        for (int i = 0;i < paths.size();i++) {
+            if (!textures[i].loadFromFile(paths[i])) {
+                std::cerr << "Warning: Failed to load " << paths[i] << std::endl;
+            }
+        }
+    }
+    void Get_background(sf::Sprite& Background) {
+        Background.setTexture(textures[Current_texture]);
+        Background.setPosition({0, 0});
+        Background.setScale({float(app::SCREEN_WIDTH) / float(textures[Current_texture].getSize().x), 
+                             float(app::SCREEN_HEIGHT) / float(textures[Current_texture].getSize().y)});
+    }
+
+    void Next_background(sf::Sprite& Background) {
+        Current_texture++;
+        Current_texture %= textures.size();
+        Get_background(Background);
+    }
+
+    background_manager() = default;
+};
