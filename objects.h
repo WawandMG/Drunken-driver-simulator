@@ -612,6 +612,11 @@ namespace obj {
             Speed = 0.0f;
         }
 
+        // каждый кадр смотрим в текущую точку, иначе после отката индекса
+        // машина уезжает по старому направлению наискосок и не возвращается
+        Direction = waypoints[waypoint_i] - Pos;
+        NormalizeDirection();
+
         float step = Km_to_Px(Speed) * dt;
         if (ahead) {
             float room = ahead_d - gap;
@@ -637,6 +642,16 @@ namespace obj {
                 }
                 break;
             }
+            // не перескакиваем точку, до которой передняя машина ещё не доехала
+            if (ahead && turn == ahead->turn) {
+                int ahead_n = lane->GetWaypoints().size();
+                if (ahead->own_route.size() > 0) {
+                    ahead_n = ahead->own_route.size();
+                }
+                if (ahead_n == waypoints.size() && waypoint_i - 1 < ahead->waypoint_i) {
+                    break;
+                }
+            }
             waypoint_i--;
 
             if (waypoint_i >= 0) {
@@ -654,15 +669,15 @@ namespace obj {
         if (ahead) {
             float d = get_distance(Pos, ahead->Pos);
             if (d < gap) {
-                Pos = ahead->Pos - Direction * gap;
+                // отодвигаем назад по линии между машинами, а не по носу:
+                // на повороте нос уже смотрит в сторону и выкидывает машину с дороги
+                if (d > 0.0f) {
+                    sf::Vector2f back = Pos - ahead->Pos;
+                    Pos = ahead->Pos + back * (gap / d);
+                } else {
+                    Pos = ahead->Pos - Direction * gap;
+                }
                 Speed = 0.0f;
-            }
-            int ahead_n = ahead->own_route.empty()
-                ? lane->GetWaypoints().size()
-                : ahead->own_route.size();
-            if (turn == ahead->turn && ahead_n == waypoints.size() &&
-                waypoint_i < ahead->waypoint_i) {
-                waypoint_i = ahead->waypoint_i;
             }
         }
     }
