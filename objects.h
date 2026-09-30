@@ -1140,7 +1140,7 @@ namespace obj {
         public:
             void AddLane(Lane* l) { Lanes.push_back(l); }
             const std::vector<Lane*>& GetLanes() const { return Lanes; }
-
+//
             // одна дорога = один подъезд к перекрёстку
             // outward: запад {-1,0}, восток {1,0}, север {0,1}, юг {0,-1}
             void Build(sf::Vector2f outward, int n = 6) {
