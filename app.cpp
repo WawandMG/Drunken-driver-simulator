@@ -7,15 +7,13 @@ void app::run() {
     sf::RenderWindow window(sf::VideoMode({app::SCREEN_WIDTH, app::SCREEN_HEIGHT}), "App");
     window.setFramerateLimit(60);
 
-    // 1. Инициализация ImGui для SFML
     if (!ImGui::SFML::Init(window)) {
-        // Если инициализация провалилась, выходим или логируем ошибку
         return; 
     }
 
     obj::World World;
     World.Build();
-    sf::Clock deltaClock; // Часы для измерения времени между кадрами
+    sf::Clock deltaClock; 
 
     background_manager Back;
     Back.Init_textures();
@@ -25,24 +23,18 @@ void app::run() {
     
     Back.Get_background(Background);
     while (window.isOpen()) {
-        // 2. Обработка событий SFML 3.0
-        // В SFML 3.0 pollEvent возвращает std::optional<sf::Event>
         while (const std::optional<sf::Event> event = window.pollEvent()) {
             if (event->is<sf::Event::Closed>()) {
                 window.close();
             }
             
-
-            // Передаем событие в ImGui, чтобы он понимал клики и клавиши
             ImGui::SFML::ProcessEvent(window, *event);
         }
 
-        // 3. Обновление ImGui 
         sf::Time dt = deltaClock.restart();
         ImGui::SFML::Update(window, dt);
 
 
-        // --- РИСОВАНИЕ ---
         World.Update(dt.asSeconds());
 
         ImGui::SetNextWindowSize({390, 590}, ImGuiCond_FirstUseEver);
@@ -138,7 +130,6 @@ void app::run() {
 
         app::Render_world(window, World, Background);
 
-        // 4. Рендер ImGui (поверх всего, что нарисовано в window)
         ImGui::SFML::Render(window);
         window.resetGLStates();
         window.display();

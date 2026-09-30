@@ -23,19 +23,17 @@ inline float GenFloat(float l, float r) {
 
 
 namespace config {
-    // 8 пикселей = 1 метр, окно ~1200x800, центр экрана = перекрёсток
-    inline const float Pixels_to_meter = 8.0f;
-    // Дальнейшие величины - указаны в метрах
-
-    inline const float Lane_width_m = 3.5f;   // метры
-    inline const float Car_length_m = 4.5f;
-    inline const float Car_width_m = 1.8f;
-    inline const float Crossing_dist_m = 16.0f; // от центра до зебры, 6 рядов
-    inline const float Stop_dist_m = 20.0f;     // от центра до стоп-линии
-    inline const float Road_length_m = 64.f;    // от центра до края, есть прямой кусок до перестроения
-    inline const float Waypoint_step_m = 10.f;
-    inline const float Waypoint_reach_m = 1.0f; // Расстояние на котором машина считает, что достигла waypoint
-    inline const float Light_clearance_m = 5.0f; // от границы перекрёстка до светофора
+    inline constexpr float Pixels_to_meter = 8.0f;
+    
+    inline constexpr float Lane_width_m = 3.5f;   // _m - метры
+    inline constexpr float Car_length_m = 4.5f;
+    inline constexpr float Car_width_m = 1.8f;
+    inline constexpr float Crossing_dist_m = 16.0f; // от центра до зебры, 6 рядов
+    inline constexpr float Stop_dist_m = 20.0f;     // от центра до стоп-линии
+    inline constexpr float Road_length_m = 64.f;    // от центра до края, есть прямой кусок до перестроения
+    inline constexpr float Waypoint_step_m = 10.f;
+    inline constexpr float Waypoint_reach_m = 1.0f; // Расстояние на котором машина считает, что достигла waypoint
+    inline constexpr float Light_clearance_m = 5.0f; // от границы перекрёстка до светофора
     inline float Green_s = 12.0f;
     inline float Yellow_s = 3.0f;
     inline float Static_red_s = 12.0f;
@@ -44,15 +42,15 @@ namespace config {
     inline float Vehicle_speed_max_kmh = 120.0f;
     inline float Car_arrival_min_s = 4.0f;
     inline float Car_arrival_max_s = 8.0f;
-    inline const float Automatic_min_green_s = 5.0f;
-    inline const float Automatic_max_green_s = 30.0f;
-    inline const float Automatic_seconds_per_waiting_car = 1.5f;
-    inline const float Automatic_yellow_s = 3.0f;
-    inline const float Automatic_min_walk_s = 5.0f;
-    inline const float Automatic_max_walk_s = 24.0f;
-    inline const float Automatic_seconds_per_waiting_pedestrian = 1.5f;
-    inline const float Pedestrian_arrival_min_s = 2.5f;
-    inline const float Pedestrian_arrival_max_s = 7.0f;
+    inline constexpr float Automatic_min_green_s = 5.0f;
+    inline constexpr float Automatic_max_green_s = 30.0f;
+    inline constexpr float Automatic_seconds_per_waiting_car = 1.5f;
+    inline constexpr float Automatic_yellow_s = 3.0f;
+    inline constexpr float Automatic_min_walk_s = 5.0f;
+    inline constexpr float Automatic_max_walk_s = 24.0f;
+    inline constexpr float Automatic_seconds_per_waiting_pedestrian = 1.5f;
+    inline constexpr float Pedestrian_arrival_min_s = 2.5f;
+    inline constexpr float Pedestrian_arrival_max_s = 7.0f;
     enum class direction {
         North = 0,  // Дорога направлена наверх
         South = 1,  // Дорога направлена вниз
@@ -87,7 +85,10 @@ namespace obj {
         protected:
             // Позиция объекта
             sf::Vector2f Pos;
-
+            /*
+                Укзаывает направление в которое смотрит объект
+                В обычном случае – нормализованная velocity
+            */
             sf::Vector2f Direction;
             // Передвижение в км/ч, для экрана перевод в отдельной функции
             sf::Vector2f Velocity;
@@ -257,7 +258,7 @@ namespace obj {
     class Lane {
         private:
             sf::Vector2f corners[4]; // 4 угла полосы для отрисовки
-
+            
             config::direction Direction;
             /*
             После Connect маршрут лежит наоборот ходу машины:
@@ -394,32 +395,17 @@ namespace obj {
                     AddWaypoint(outward * Meters_to_Px(d) + offset);
                 }
                 AddWaypoint(outward * Meters_to_Px(config::Road_length_m) + offset);
-                // Расстояние от центра перекрёстка, с которого начинается видимая полоса.
-                // Нужно, чтобы дороги рисовались ВОКРУГ невидимого перекрёстка.
                 const float near_d = config::Crossing_dist_m;
-
-                // Если захочешь, чтобы дороги сходились прямо в центр экрана,
-                // замени строку выше на:
-                // const float near_d = 0.0f;
-
-                // Перпендикуляр к направлению дороги.
-                // Если outward = {x, y}, то perp = {-y, x}.
-                // Это поворот вектора на 90 градусов.
                 sf::Vector2f perp{-outward.y, outward.x};
 
-                // Половина ширины полосы в пикселях.
                 float half_w = Meters_to_Px(config::Lane_width_m) * 0.5f;
 
-                // Ближний центр полосы, со стороны перекрёстка.
                 sf::Vector2f near_center =
                     outward * Meters_to_Px(near_d) + offset;
 
-                // Дальний центр полосы, у края дороги.
                 sf::Vector2f far_center =
                     outward * Meters_to_Px(config::Road_length_m) + offset;
 
-                // Четыре угла полосы.
-                // Порядок важен для sf::ConvexShape.
                 corners[0] = near_center + perp * half_w;
                 corners[1] = near_center - perp * half_w;
                 corners[2] = far_center  - perp * half_w;
@@ -661,7 +647,6 @@ namespace obj {
         if (GapOnLane(next, forward) < 0.0f) {
             return;
         }
-        // в своём ряду впереди тоже должно быть пусто, иначе упрёмся на полпути
         const std::vector<Car*>& mine = lane->GetCars();
         for (int i = 0; i < mine.size(); i++) {
             Car* other = mine[i];
@@ -795,8 +780,7 @@ namespace obj {
             }
         }
         int stop_i = own_stop >= 0 ? own_stop : lane->StopIndex();
-        // стоим так, чтобы бампер был на стоп-линии, а не центр машины.
-        // иначе капот на 2 метра ближе к перекрёстку и лежит на зебре
+        
         sf::Vector2f away = lane->GetOutward();
         float nose_px = Meters_to_Px(config::Car_length_m * 0.5f);
         sf::Vector2f hold(0.0f, 0.0f);
@@ -934,10 +918,6 @@ namespace obj {
             Speed = 0.0f;
         }
 
-        // каждый кадр смотрим в текущую точку, иначе после отката индекса
-        // машина уезжает по старому направлению наискосок и не возвращается.
-        // если уже стоим в точке, ноль не оставляем: рисунок тогда смотрит на восток,
-        // и на вертикальной дороге машина стоит боком
         sf::Vector2f aim = waypoints[waypoint_i] - Pos;
         if (aim.x * aim.x + aim.y * aim.y < 0.01f && waypoint_i > 0) {
             aim = waypoints[waypoint_i - 1] - waypoints[waypoint_i];
@@ -961,7 +941,6 @@ namespace obj {
         if (wait && have_hold) {
             float along_px = -((hold.x - Pos.x) * away.x + (hold.y - Pos.y) * away.y);
             if (along_px <= step) {
-                // чуть проскочили — возвращаем бампер на линию, глубже уже не встаём
                 if (along_px > -Meters_to_Px(1.5f)) {
                     Pos = hold;
                     Speed = 0.0f;
@@ -988,7 +967,6 @@ namespace obj {
                 }
                 break;
             }
-            // не перескакиваем точку, до которой передняя машина ещё не доехала
             if (ahead && turn == ahead->turn) {
                 int ahead_n = lane->GetWaypoints().size();
                 if (ahead->own_route.size() > 0) {
@@ -1025,8 +1003,6 @@ namespace obj {
         if (ahead) {
             float d = get_distance(Pos, ahead->Pos);
             if (d < gap) {
-                // отодвигаем назад по линии между машинами, а не по носу:
-                // на повороте нос уже смотрит в сторону и выкидывает машину с дороги
                 if (d > 0.0f) {
                     sf::Vector2f back = Pos - ahead->Pos;
                     Pos = ahead->Pos + back * (gap / d);
@@ -1201,7 +1177,6 @@ namespace obj {
         float UL_corner, UR_corner, DL_corner, DR_corner;
     };
 
-    // Переход через дорогу: от одного тротуара до другого
     class Crosswalk {
             sf::Vector2f from{};
             sf::Vector2f to{};
@@ -1299,14 +1274,13 @@ namespace obj {
                 GenFloat(config::Pedestrian_arrival_min_s, config::Pedestrian_arrival_max_s);
             int phase = 0; // на каждую ось: прямо+направо, жёлтый, налево, жёлтый, потом пешеходы
 
-            // A shared randomized interval keeps all four approaches in sync.
             void SpawnOneCarPerRoad() {
                 for (int r = 0; r < roads.size(); ++r) {
                     if (!roads[r]) {
                         continue;
                     }
                     const std::vector<Lane*>& lanes = roads[r]->GetLanes();
-                    const int inbound_lanes = (int)(lanes.size()) / 2;
+                    const int inbound_lanes = static_cast<int>(lanes.size()) / 2;
                     if (inbound_lanes <= 0) {
                         continue;
                     }
@@ -1370,7 +1344,7 @@ namespace obj {
                         continue;
                     }
                     const std::vector<Lane*>& lanes = roads[r]->GetLanes();
-                    const int approach_lanes = (int)(lanes.size()) / 2;
+                    const int approach_lanes = static_cast<int>(lanes.size()) / 2;
                     for (int i = 0; i < approach_lanes; ++i) {
                         if (!lanes[i]) {
                             continue;
@@ -1400,7 +1374,7 @@ namespace obj {
                         continue;
                     }
                     const std::vector<Lane*>& lanes = roads[r]->GetLanes();
-                    const int approach_lanes = (int)(lanes.size()) / 2;
+                    const int approach_lanes = static_cast<int>(lanes.size()) / 2;
                     for (int i = 0; i < approach_lanes; ++i) {
                         const bool is_left_turn_lane = i == approach_lanes - 1;
                         if (left_turn_phase != is_left_turn_lane || !lanes[i]) {
@@ -1420,7 +1394,7 @@ namespace obj {
             }
 
             float AutomaticGreenLimit() const {
-                const float demand = (float)(CountWaitingCarsForActivePhase());
+                const float demand = static_cast<float>(CountWaitingCarsForActivePhase());
                 return std::min(
                     config::Automatic_max_green_s,
                     config::Automatic_min_green_s +
@@ -1428,7 +1402,7 @@ namespace obj {
             }
 
             float AutomaticWalkLimit() const {
-                const float demand = (float)(waiting_pedestrians);
+                const float demand = static_cast<float>(waiting_pedestrians);
                 return std::min(
                     config::Automatic_max_walk_s,
                     config::Automatic_min_walk_s +
@@ -1527,14 +1501,12 @@ namespace obj {
                 int stop_travel = approach_n - 2;
                 sf::Vector2f A = approach[0];
                 if (maneuver == Lane::Maneuver::Straight) {
-                    // встречка развёрнута: едем к дальнему краю и там пропадаем
                     sf::Vector2f B = exit_pts[exit_pts.size() - 1];
                     travel.push_back((A + B) * 0.5f);
                     for (int p = exit_pts.size() - 1; p >= 0; p--) {
                         travel.push_back(exit_pts[p]);
                     }
                 } else {
-                    // нос по ходу выезда, от центра наружу
                     sf::Vector2f exit_dir = exit_lane->GetOutward();
                     float inner = Meters_to_Px(7.0f);
                     sf::Vector2f enter = lane->GetOffset() + lane->GetOutward() * inner;
@@ -1582,18 +1554,15 @@ namespace obj {
                     const std::vector<Lane*>& lanes = roads[r]->GetLanes();
                     for (int i = 0; i < n; ++i) {
                         Lane* lane = lanes[i];
-                        // верхние ряды — встречка, свой маршрут уже развёрнут
                         if (i >= n / 2) {
                             continue;
                         }
-                        // ближний светофор справа, вдоль правой стены
                         lane->SetLight(&lights[r]);
 
                         std::vector<sf::Vector2f> route;
                         int stop_index = 0;
                         Lane* exit_lane = nullptr;
 
-                        // у центра: только налево. прямо — соседний ряд, направо — крайний
                         if (i == n / 2 - 1) {
                             FillRoute(saved, lane, r, i, left_of[r], n / 2, Lane::Maneuver::Left, route, stop_index, exit_lane);
                             lane->SetManeuver(Lane::Maneuver::Left);
@@ -1605,7 +1574,6 @@ namespace obj {
                                 lane->AddYield(oncoming[k]);
                             }
                         } else if (i == 0) {
-                            // правая стена: только направо, на левой дороге это вниз
                             FillRoute(saved, lane, r, i, right_of[r], n - 1, Lane::Maneuver::Right, route, stop_index, exit_lane);
                             lane->SetManeuver(Lane::Maneuver::Right);
                             lane->SetExit(exit_lane);
@@ -1707,7 +1675,7 @@ namespace obj {
                         if (walk_spawn >= 1.2f && waiting_pedestrians > 0 &&
                             !walks.empty()) {
                             walk_spawn = 0.0f;
-                            const int start = Gen(0, (int)(walks.size()) - 1);
+                            const int start = Gen(0, static_cast<int>(walks.size()) - 1);
                             for (int offset = 0; offset < walks.size(); ++offset) {
                                 const int r = (start + offset) % walks.size();
                                 if (!CarOnWalk(walks[r]) && walks[r].Spawn()) {
