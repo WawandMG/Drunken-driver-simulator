@@ -24,18 +24,18 @@ inline float GenFloat(float l, float r) {
 
 namespace config {
     // 8 пикселей = 1 метр, окно ~1200x800, центр экрана = перекрёсток
-    inline constexpr float Pixels_to_meter = 8.0f;
+    inline const float Pixels_to_meter = 8.0f;
     // Дальнейшие величины - указаны в метрах
 
-    inline constexpr float Lane_width_m = 3.5f;   // метры
-    inline constexpr float Car_length_m = 4.5f;
-    inline constexpr float Car_width_m = 1.8f;
-    inline constexpr float Crossing_dist_m = 16.0f; // от центра до зебры, 6 рядов
-    inline constexpr float Stop_dist_m = 20.0f;     // от центра до стоп-линии
-    inline constexpr float Road_length_m = 64.f;    // от центра до края, есть прямой кусок до перестроения
-    inline constexpr float Waypoint_step_m = 10.f;
-    inline constexpr float Waypoint_reach_m = 1.0f; // Расстояние на котором машина считает, что достигла waypoint
-    inline constexpr float Light_clearance_m = 5.0f; // от границы перекрёстка до светофора
+    inline const float Lane_width_m = 3.5f;   // метры
+    inline const float Car_length_m = 4.5f;
+    inline const float Car_width_m = 1.8f;
+    inline const float Crossing_dist_m = 16.0f; // от центра до зебры, 6 рядов
+    inline const float Stop_dist_m = 20.0f;     // от центра до стоп-линии
+    inline const float Road_length_m = 64.f;    // от центра до края, есть прямой кусок до перестроения
+    inline const float Waypoint_step_m = 10.f;
+    inline const float Waypoint_reach_m = 1.0f; // Расстояние на котором машина считает, что достигла waypoint
+    inline const float Light_clearance_m = 5.0f; // от границы перекрёстка до светофора
     inline float Green_s = 12.0f;
     inline float Yellow_s = 3.0f;
     inline float Static_red_s = 12.0f;
@@ -44,15 +44,15 @@ namespace config {
     inline float Vehicle_speed_max_kmh = 120.0f;
     inline float Car_arrival_min_s = 4.0f;
     inline float Car_arrival_max_s = 8.0f;
-    inline constexpr float Automatic_min_green_s = 5.0f;
-    inline constexpr float Automatic_max_green_s = 30.0f;
-    inline constexpr float Automatic_seconds_per_waiting_car = 1.5f;
-    inline constexpr float Automatic_yellow_s = 3.0f;
-    inline constexpr float Automatic_min_walk_s = 5.0f;
-    inline constexpr float Automatic_max_walk_s = 24.0f;
-    inline constexpr float Automatic_seconds_per_waiting_pedestrian = 1.5f;
-    inline constexpr float Pedestrian_arrival_min_s = 2.5f;
-    inline constexpr float Pedestrian_arrival_max_s = 7.0f;
+    inline const float Automatic_min_green_s = 5.0f;
+    inline const float Automatic_max_green_s = 30.0f;
+    inline const float Automatic_seconds_per_waiting_car = 1.5f;
+    inline const float Automatic_yellow_s = 3.0f;
+    inline const float Automatic_min_walk_s = 5.0f;
+    inline const float Automatic_max_walk_s = 24.0f;
+    inline const float Automatic_seconds_per_waiting_pedestrian = 1.5f;
+    inline const float Pedestrian_arrival_min_s = 2.5f;
+    inline const float Pedestrian_arrival_max_s = 7.0f;
     enum class direction {
         North = 0,  // Дорога направлена наверх
         South = 1,  // Дорога направлена вниз
@@ -87,10 +87,7 @@ namespace obj {
         protected:
             // Позиция объекта
             sf::Vector2f Pos;
-            /*
-                Укзаывает направление в которое смотрит объект
-                В обычном случае – нормализованная velocity
-            */
+
             sf::Vector2f Direction;
             // Передвижение в км/ч, для экрана перевод в отдельной функции
             sf::Vector2f Velocity;
@@ -260,7 +257,7 @@ namespace obj {
     class Lane {
         private:
             sf::Vector2f corners[4]; // 4 угла полосы для отрисовки
-            
+
             config::direction Direction;
             /*
             После Connect маршрут лежит наоборот ходу машины:
@@ -1309,7 +1306,7 @@ namespace obj {
                         continue;
                     }
                     const std::vector<Lane*>& lanes = roads[r]->GetLanes();
-                    const int inbound_lanes = static_cast<int>(lanes.size()) / 2;
+                    const int inbound_lanes = (int)(lanes.size()) / 2;
                     if (inbound_lanes <= 0) {
                         continue;
                     }
@@ -1373,7 +1370,7 @@ namespace obj {
                         continue;
                     }
                     const std::vector<Lane*>& lanes = roads[r]->GetLanes();
-                    const int approach_lanes = static_cast<int>(lanes.size()) / 2;
+                    const int approach_lanes = (int)(lanes.size()) / 2;
                     for (int i = 0; i < approach_lanes; ++i) {
                         if (!lanes[i]) {
                             continue;
@@ -1403,7 +1400,7 @@ namespace obj {
                         continue;
                     }
                     const std::vector<Lane*>& lanes = roads[r]->GetLanes();
-                    const int approach_lanes = static_cast<int>(lanes.size()) / 2;
+                    const int approach_lanes = (int)(lanes.size()) / 2;
                     for (int i = 0; i < approach_lanes; ++i) {
                         const bool is_left_turn_lane = i == approach_lanes - 1;
                         if (left_turn_phase != is_left_turn_lane || !lanes[i]) {
@@ -1423,7 +1420,7 @@ namespace obj {
             }
 
             float AutomaticGreenLimit() const {
-                const float demand = static_cast<float>(CountWaitingCarsForActivePhase());
+                const float demand = (float)(CountWaitingCarsForActivePhase());
                 return std::min(
                     config::Automatic_max_green_s,
                     config::Automatic_min_green_s +
@@ -1431,7 +1428,7 @@ namespace obj {
             }
 
             float AutomaticWalkLimit() const {
-                const float demand = static_cast<float>(waiting_pedestrians);
+                const float demand = (float)(waiting_pedestrians);
                 return std::min(
                     config::Automatic_max_walk_s,
                     config::Automatic_min_walk_s +
@@ -1710,7 +1707,7 @@ namespace obj {
                         if (walk_spawn >= 1.2f && waiting_pedestrians > 0 &&
                             !walks.empty()) {
                             walk_spawn = 0.0f;
-                            const int start = Gen(0, static_cast<int>(walks.size()) - 1);
+                            const int start = Gen(0, (int)(walks.size()) - 1);
                             for (int offset = 0; offset < walks.size(); ++offset) {
                                 const int r = (start + offset) % walks.size();
                                 if (!CarOnWalk(walks[r]) && walks[r].Spawn()) {
