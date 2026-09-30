@@ -32,7 +32,7 @@ namespace config {
     inline constexpr float Car_width_m = 1.8f;
     inline constexpr float Crossing_dist_m = 16.0f; // от центра до зебры, 6 рядов
     inline constexpr float Stop_dist_m = 20.0f;     // от центра до стоп-линии
-    inline constexpr float Road_length_m = 44.f;    // от центра до края
+    inline constexpr float Road_length_m = 64.f;    // от центра до края, есть прямой кусок до перестроения
     inline constexpr float Waypoint_step_m = 10.f;
     inline constexpr float Waypoint_reach_m = 1.0f; // Расстояние на котором машина считает, что достигла waypoint
     inline constexpr float Light_clearance_m = 5.0f; // от границы перекрёстка до светофора
@@ -148,8 +148,16 @@ namespace obj {
             int own_stop = -1;
             int turn = 1; // 0 направо, 1 прямо, 2 налево
             Lane* my_exit = nullptr;
-            // потом: соседний ряд + прогресс 0..1
             bool alive = true;
+            bool stepped = false;
+            // -1 вправо, 0 только если впереди медленный, 1 влево
+            int lane_plan = 0;
+            bool can_change = true;
+            Lane* changing_to = nullptr;
+            void TryChangeLane();
+            void SlideLane(float dt);
+            void FinishLaneChange(sf::Vector2f forward);
+            float GapOnLane(Lane* target, sf::Vector2f forward);
         public:
             bool IsAlive() const {
                 return alive;
@@ -157,6 +165,10 @@ namespace obj {
 
             int Turn() const { return turn; }
             int StopAt() const { return own_stop; }
+            Lane* GetLane() const { return lane; }
+            void MarkStepped() { stepped = true; }
+            void ClearStep() { stepped = false; }
+            bool Stepped() const { return stepped; }
 
             Car() {
                 const float min_speed = std::min(
@@ -262,6 +274,8 @@ namespace obj {
             int stop_i = 1;
             TrafficLight* light = nullptr;
             Lane* exit_lane = nullptr;
+            Lane* lane_left = nullptr;
+            Lane* lane_right = nullptr;
             std::vector<Lane*> yield_lanes;
             struct Choice {
                 std::vector<sf::Vector2f> pts;
@@ -336,6 +350,27 @@ namespace obj {
             Lane* ChoiceExit(int i) const { return choices[i].exit; }
             sf::Vector2f GetOffset() const { return offset; }
             sf::Vector2f GetOutward() const { return outward; }
+            void SetSideLanes(Lane* left, Lane* right) {
+                lane_left = left;
+                lane_right = right;
+            }
+            Lane* LeftLane() const { return lane_left; }
+            Lane* RightLane() const { return lane_right; }
+            void Detach(Car* self) {
+                for (int i = 0; i < cars.size(); i++) {
+                    if (cars[i] == self) {
+                        cars.erase(cars.begin() + i);
+                        return;
+                    }
+                }
+            }
+            void ResetSteps() {
+                for (int i = 0; i < cars.size(); i++) {
+                    if (cars[i]) {
+                        cars[i]->ClearStep();
+                    }
+                }
+            }
             void SetRoute(const std::vector<sf::Vector2f>& pts, int stop_index) {
                 waypoints = pts;
                 stop_i = stop_index;
@@ -347,6 +382,7 @@ namespace obj {
             bool ExitBusy() const;
             bool ExitBlocked(Lane* exit) const;
             Signal CurrentSignal() const;
+            float LightRemain() const;
 
             void AddWaypoint(sf::Vector2f p) { waypoints.push_back(p); }
 
@@ -400,12 +436,23 @@ namespace obj {
                         cars.erase(cars.begin() + i);
                         continue;
                     }
+                    if (car->Stepped()) {
+                        continue;
+                    }
 
                     car->Update(dt);
+                    car->MarkStepped();
 
                     if (!car->IsAlive()) {
+                        bool still_here = i < cars.size() && cars[i] == car;
                         delete car;
-                        cars.erase(cars.begin() + i);
+                        if (still_here) {
+                            cars.erase(cars.begin() + i);
+                        }
+                        continue;
+                    }
+                    if (car->GetLane() != this) {
+                        continue;
                     }
                 }
             }
@@ -506,10 +553,227 @@ namespace obj {
                 SetSpeed(0.0f);
             }
         }
+
+        // часть машин сразу целится в соседний ряд, остальные уходят туда, только если впереди медленный
+        int roll = Gen(0, 2);
+        if (roll == 1 && lane->LeftLane()) {
+            lane_plan = 1;
+        } else if (roll == 2 && lane->RightLane()) {
+            lane_plan = -1;
+        } else {
+            lane_plan = 0;
+        }
+    }
+
+    inline float Car::GapOnLane(Lane* target, sf::Vector2f forward) {
+        if (!target) {
+            return -1.0f;
+        }
+        float behind = Meters_to_Px(10.0f);
+        float ahead_need = Meters_to_Px(14.0f);
+        float nearest = Meters_to_Px(80.0f);
+        const std::vector<Car*>& queue = target->GetCars();
+        for (int i = 0; i < queue.size(); i++) {
+            Car* other = queue[i];
+            if (!other || other == this || !other->IsAlive()) {
+                continue;
+            }
+            sf::Vector2f rel = other->GetPos() - Pos;
+            float along = rel.x * forward.x + rel.y * forward.y;
+            if (along > -behind && along < ahead_need) {
+                return -1.0f;
+            }
+            if (along >= ahead_need && along < nearest) {
+                nearest = along;
+            }
+        }
+        return nearest;
+    }
+
+    inline void Car::TryChangeLane() {
+        if (!can_change || !lane || Speed < 15.0f) {
+            return;
+        }
+        int stop_i = own_stop >= 0 ? own_stop : lane->StopIndex();
+        const std::vector<sf::Vector2f>& pts = lane->GetWaypoints();
+        if (stop_i < 0 || stop_i >= pts.size()) {
+            return;
+        }
+        // сначала едем прямо от края, у стоп-линии уже не перестраиваемся
+        if (waypoint_i < stop_i) {
+            can_change = false;
+            return;
+        }
+        sf::Vector2f outward = lane->GetOutward();
+        float from_center = Pos.x * outward.x + Pos.y * outward.y;
+        float from_edge = Meters_to_Px(config::Road_length_m) - from_center;
+        if (from_edge < Meters_to_Px(18.0f)) {
+            return;
+        }
+        if (get_distance(Pos, pts[stop_i]) < Meters_to_Px(16.0f)) {
+            can_change = false;
+            return;
+        }
+
+        sf::Vector2f forward(-outward.x, -outward.y);
+        int side = lane_plan;
+        if (side == 0) {
+            Car* blocker = nullptr;
+            float blocker_d = 0.0f;
+            const std::vector<Car*>& queue = lane->GetCars();
+            for (int i = 0; i < queue.size(); i++) {
+                Car* other = queue[i];
+                if (!other || other == this || !other->IsAlive()) {
+                    continue;
+                }
+                sf::Vector2f rel = other->GetPos() - Pos;
+                float along = rel.x * forward.x + rel.y * forward.y;
+                if (along < Meters_to_Px(2.0f) || along > Meters_to_Px(22.0f)) {
+                    continue;
+                }
+                if (!blocker || along < blocker_d) {
+                    blocker = other;
+                    blocker_d = along;
+                }
+            }
+            if (!blocker || blocker->Speed > Speed * 0.6f) {
+                return;
+            }
+            float left_room = GapOnLane(lane->LeftLane(), forward);
+            float right_room = GapOnLane(lane->RightLane(), forward);
+            if (left_room < 0.0f && right_room < 0.0f) {
+                return;
+            }
+            if (left_room >= right_room) {
+                side = 1;
+            } else {
+                side = -1;
+            }
+        }
+
+        Lane* next = nullptr;
+        if (side > 0) {
+            next = lane->LeftLane();
+        } else if (side < 0) {
+            next = lane->RightLane();
+        }
+        if (!next) {
+            can_change = false;
+            return;
+        }
+        if (GapOnLane(next, forward) < 0.0f) {
+            return;
+        }
+        // в своём ряду впереди тоже должно быть пусто, иначе упрёмся на полпути
+        const std::vector<Car*>& mine = lane->GetCars();
+        for (int i = 0; i < mine.size(); i++) {
+            Car* other = mine[i];
+            if (!other || other == this || !other->IsAlive()) {
+                continue;
+            }
+            sf::Vector2f rel = other->GetPos() - Pos;
+            float along = rel.x * forward.x + rel.y * forward.y;
+            if (along > 0.0f && along < Meters_to_Px(12.0f)) {
+                return;
+            }
+        }
+
+        float dist_stop_m = get_distance(Pos, pts[stop_i]) / config::Pixels_to_meter;
+        float need_m = Speed / 3.6f * 0.45f + 4.0f;
+        if (dist_stop_m < need_m) {
+            return;
+        }
+        changing_to = next;
+    }
+
+    inline void Car::FinishLaneChange(sf::Vector2f forward) {
+        Lane* next = changing_to;
+        changing_to = nullptr;
+        if (!next || !lane) {
+            return;
+        }
+        sf::Vector2f offset = next->GetOffset();
+        float along_pos = (Pos.x - offset.x) * forward.x + (Pos.y - offset.y) * forward.y;
+        Pos = sf::Vector2f(offset.x + forward.x * along_pos, offset.y + forward.y * along_pos);
+        Direction = forward;
+        NormalizeDirection();
+
+        if (next->GetManeuver() == Lane::Maneuver::Right) {
+            turn = 0;
+        } else if (next->GetManeuver() == Lane::Maneuver::Left) {
+            turn = 2;
+        } else {
+            turn = 1;
+        }
+        own_stop = next->StopIndex();
+        my_exit = next->GetExit();
+        own_route.clear();
+
+        const std::vector<sf::Vector2f>& next_pts = next->GetWaypoints();
+        int best = -1;
+        float best_along = 0.0f;
+        for (int i = 0; i < next_pts.size(); i++) {
+            sf::Vector2f rel = next_pts[i] - Pos;
+            float along = rel.x * forward.x + rel.y * forward.y;
+            if (along < Meters_to_Px(1.0f)) {
+                continue;
+            }
+            if (best < 0 || along < best_along) {
+                best = i;
+                best_along = along;
+            }
+        }
+        if (best < 0) {
+            best = next->StopIndex();
+            if (best < 0 || best >= next_pts.size()) {
+                best = 0;
+            }
+        }
+        waypoint_i = best;
+
+        Lane* old = lane;
+        lane = next;
+        old->Detach(this);
+        next->Car_push(this);
+        can_change = false;
+    }
+
+    inline void Car::SlideLane(float dt) {
+        if (!changing_to) {
+            return;
+        }
+        sf::Vector2f forward(-changing_to->GetOutward().x, -changing_to->GetOutward().y);
+        sf::Vector2f offset = changing_to->GetOffset();
+        float along = (Pos.x - offset.x) * forward.x + (Pos.y - offset.y) * forward.y;
+        sf::Vector2f center(offset.x + forward.x * along, offset.y + forward.y * along);
+        sf::Vector2f side = center - Pos;
+        float lat = std::sqrt(side.x * side.x + side.y * side.y);
+        float side_step = Meters_to_Px(8.0f) * dt;
+        float forward_step = Km_to_Px(Speed) * dt;
+        if (lat <= Meters_to_Px(0.2f) || side_step >= lat) {
+            Pos += forward * forward_step;
+            FinishLaneChange(forward);
+            return;
+        }
+        sf::Vector2f side_dir(side.x / lat, side.y / lat);
+        Pos += forward * forward_step;
+        Pos += side_dir * side_step;
+        Direction = forward * forward_step + side_dir * side_step;
+        NormalizeDirection();
     }
 
     inline void Car::Update(float dt) {
         if (!lane) {
+            return;
+        }
+
+        if (changing_to) {
+            SlideLane(dt);
+            return;
+        }
+        TryChangeLane();
+        if (changing_to) {
+            SlideLane(dt);
             return;
         }
 
@@ -534,6 +798,16 @@ namespace obj {
             }
         }
         int stop_i = own_stop >= 0 ? own_stop : lane->StopIndex();
+        // стоим так, чтобы бампер был на стоп-линии, а не центр машины.
+        // иначе капот на 2 метра ближе к перекрёстку и лежит на зебре
+        sf::Vector2f away = lane->GetOutward();
+        float nose_px = Meters_to_Px(config::Car_length_m * 0.5f);
+        sf::Vector2f hold(0.0f, 0.0f);
+        bool have_hold = false;
+        if (stop_i >= 0 && stop_i < waypoints.size()) {
+            hold = waypoints[stop_i] + away * nose_px;
+            have_hold = true;
+        }
         int my_prog = waypoints.size() - 1 - waypoint_i;
         bool me_before = waypoint_i >= stop_i;
         Car* ahead = nullptr;
@@ -581,47 +855,68 @@ namespace obj {
         }
 
         bool wait = false;
-        if (waypoint_i >= stop_i && lane->GetLight() != nullptr) {
-            float dist_stop = get_distance(Pos, waypoints[stop_i]);
-            if (dist_stop <= Meters_to_Px(config::Signal_visibility_m)) {
-                Signal sig = lane->CurrentSignal();
-                // зелёный круг: прямо и направо. зелёная стрелка: только налево
-                bool go = false;
-                if (turn == 2) {
-                    if (sig == Signal::GreenLeft) {
-                        go = true;
-                    } else if (sig == Signal::YellowLeft &&
-                               dist_stop <= Meters_to_Px(6.0f)) {
-                        go = true;
-                    }
-                } else if (sig == Signal::Green) {
-                    go = true;
-                } else if (sig == Signal::Yellow &&
-                           dist_stop <= Meters_to_Px(6.0f)) {
-                    go = true;
+        float along_m = 0.0f;
+        if (have_hold) {
+            // плюс — точка остановки ещё впереди, минус — бампер уже за линией
+            float along_px = -((hold.x - Pos.x) * away.x + (hold.y - Pos.y) * away.y);
+            along_m = along_px / config::Pixels_to_meter;
+        }
+        if (waypoint_i >= stop_i && lane->GetLight() != nullptr && have_hold) {
+            float speed_m = Speed / 3.6f;
+            float brake_a = 40.0f / 3.6f;
+            float stop_need = 0.0f;
+            float t_stop = 0.0f;
+            if (speed_m > 0.2f) {
+                stop_need = speed_m * speed_m / (2.0f * brake_a);
+                t_stop = speed_m / brake_a;
+            }
+            // где окажется бампер, если тормозить отсюда. линия на 20 м, зебра с 16 м
+            float nose_if_stop = config::Stop_dist_m + along_m - stop_need;
+            bool stop_on_zebra = nose_if_stop < config::Crossing_dist_m + 0.4f;
+            float nose_now = config::Stop_dist_m + along_m;
+            bool already_on_zebra = nose_now < config::Crossing_dist_m + 0.3f && nose_now > 9.0f;
+
+            Signal sig = lane->CurrentSignal();
+            bool my_green = false;
+            bool my_yellow = false;
+            if (turn == 2) {
+                my_green = sig == Signal::GreenLeft;
+                my_yellow = sig == Signal::YellowLeft;
+            } else {
+                my_green = sig == Signal::Green;
+                my_yellow = sig == Signal::Yellow;
+            }
+
+            float remain = lane->LightRemain();
+            float time_clear = (along_m + 14.0f) / (speed_m > 3.0f ? speed_m : 3.0f);
+            bool go = false;
+            if (already_on_zebra || (stop_on_zebra && speed_m > 0.8f)) {
+                go = true;
+            } else if (my_green && remain > t_stop + 0.6f && remain >= time_clear) {
+                go = true;
+            }
+            if (!go) {
+                wait = true;
+            }
+            if (!stop_on_zebra && !already_on_zebra) {
+                if (turn == 2 && lane->YieldNow()) {
+                    wait = true;
                 }
-                if (!go) {
+                Lane* exit = my_exit ? my_exit : lane->GetExit();
+                if (lane->ExitBlocked(exit)) {
                     wait = true;
                 }
             }
-            if (turn == 2 && lane->YieldNow()) {
-                wait = true;
-            }
-            Lane* exit = my_exit ? my_exit : lane->GetExit();
-            if (lane->ExitBlocked(exit)) {
-                wait = true;
-            }
         }
         if (wait) {
-            float dist_stop = get_distance(Pos, waypoints[stop_i]);
-            float horizon = Meters_to_Px(22.0f);
-            if (dist_stop <= Meters_to_Px(1.5f)) {
-                target = 0.0f;
-            } else if (dist_stop < horizon) {
-                float cap = Speed_limit * (dist_stop / horizon);
-                if (cap < target) {
-                    target = cap;
-                }
+            float usable = along_m - 0.3f;
+            float cap = 0.0f;
+            if (usable > 0.3f) {
+                float a = 40.0f / 3.6f;
+                cap = std::sqrt(2.0f * a * usable) * 3.6f;
+            }
+            if (cap < target) {
+                target = cap;
             }
         }
 
@@ -643,9 +938,17 @@ namespace obj {
         }
 
         // каждый кадр смотрим в текущую точку, иначе после отката индекса
-        // машина уезжает по старому направлению наискосок и не возвращается
-        Direction = waypoints[waypoint_i] - Pos;
-        NormalizeDirection();
+        // машина уезжает по старому направлению наискосок и не возвращается.
+        // если уже стоим в точке, ноль не оставляем: рисунок тогда смотрит на восток,
+        // и на вертикальной дороге машина стоит боком
+        sf::Vector2f aim = waypoints[waypoint_i] - Pos;
+        if (aim.x * aim.x + aim.y * aim.y < 0.01f && waypoint_i > 0) {
+            aim = waypoints[waypoint_i - 1] - waypoints[waypoint_i];
+        }
+        if (aim.x != 0.0f || aim.y != 0.0f) {
+            Direction = aim;
+            NormalizeDirection();
+        }
 
         float step = Km_to_Px(Speed) * dt;
         if (ahead) {
@@ -658,7 +961,23 @@ namespace obj {
             }
         }
         Velocity = Direction * Km_to_Px(Speed);
-        Pos += Direction * step;
+        if (wait && have_hold) {
+            float along_px = -((hold.x - Pos.x) * away.x + (hold.y - Pos.y) * away.y);
+            if (along_px <= step) {
+                // чуть проскочили — возвращаем бампер на линию, глубже уже не встаём
+                if (along_px > -Meters_to_Px(1.5f)) {
+                    Pos = hold;
+                    Speed = 0.0f;
+                    step = 0.0f;
+                } else {
+                    Pos += Direction * step;
+                }
+            } else {
+                Pos += Direction * step;
+            }
+        } else {
+            Pos += Direction * step;
+        }
 
         float waypoint_reach_px = Meters_to_Px(config::Waypoint_reach_m);
 
@@ -667,8 +986,8 @@ namespace obj {
             if (wait && waypoint_i <= stop_i) {
                 waypoint_i = stop_i;
                 Speed = 0.0f;
-                if (!ahead) {
-                    Pos = waypoints[stop_i];
+                if (!ahead && have_hold) {
+                    Pos = hold;
                 }
                 break;
             }
@@ -685,14 +1004,24 @@ namespace obj {
             waypoint_i--;
 
             if (waypoint_i >= 0) {
-                Direction = waypoints[waypoint_i] - Pos;
-                NormalizeDirection();
+                sf::Vector2f next = waypoints[waypoint_i] - Pos;
+                if (next.x * next.x + next.y * next.y < 0.01f && waypoint_i > 0) {
+                    next = waypoints[waypoint_i - 1] - waypoints[waypoint_i];
+                }
+                if (next.x != 0.0f || next.y != 0.0f) {
+                    Direction = next;
+                    NormalizeDirection();
+                }
             }
         }
 
         if (waypoint_i < 0) {
             alive = false;
-            lane = nullptr;
+            if (lane) {
+                Lane* hold = lane;
+                lane = nullptr;
+                hold->Detach(this);
+            }
             return;
         }
 
@@ -797,8 +1126,24 @@ namespace obj {
 
                     AddLane(l);
                 }
+
+                int inbound = n / 2;
+                for (int i = 0; i < inbound; i++) {
+                    Lane* left = nullptr;
+                    Lane* right = nullptr;
+                    if (i + 1 < inbound) {
+                        left = Lanes[i + 1];
+                    }
+                    if (i - 1 >= 0) {
+                        right = Lanes[i - 1];
+                    }
+                    Lanes[i]->SetSideLanes(left, right);
+                }
             }
             void Update(float dt) {
+                for (int i = 0; i < Lanes.size(); i++) {
+                    Lanes[i]->ResetSteps();
+                }
                 for(int i = 0;i < Lanes.size();i++) {
                     Lanes[i]->Update(dt);
                 }
@@ -810,21 +1155,34 @@ namespace obj {
                     }
                 }
             }
-            // соседний ряд для перестроения: Lanes[i ± 1]
+            // соседний ряд для перестроения: side > 0 влево по ходу, side < 0 вправо
             Lane* Neighbor(Lane* lane, int side);
     };
+
+    inline Lane* Road::Neighbor(Lane* lane, int side) {
+        if (!lane || side == 0) {
+            return nullptr;
+        }
+        if (side > 0) {
+            return lane->LeftLane();
+        }
+        return lane->RightLane();
+    }
 
     // Светофор стоит за углом перекрёстка, справа по ходу своего подъезда.
     class TrafficLight {
         sf::Vector2f pos;
         sf::Vector2f right; // вправо по ходу подъезда, допсекция со стрелкой
         Signal signal = Signal::Red;
+        float remain = 999.0f;
     public:
         TrafficLight(sf::Vector2f p, sf::Vector2f right_dir) : pos(p), right(right_dir) {}
         sf::Vector2f GetPos() const { return pos; }
         sf::Vector2f GetRight() const { return right; }
         Signal GetSignal() const { return signal; }
         void SetSignal(Signal s) { signal = s; }
+        float Remain() const { return remain; }
+        void SetRemain(float seconds) { remain = seconds; }
     };
 
     inline Signal Lane::CurrentSignal() const {
@@ -832,6 +1190,13 @@ namespace obj {
             return Signal::Green;
         }
         return light->GetSignal();
+    }
+
+    inline float Lane::LightRemain() const {
+        if (!light) {
+            return 999.0f;
+        }
+        return light->Remain();
     }
 
     // Класс перекрёсток
@@ -1287,7 +1652,33 @@ namespace obj {
                 BuildWalks();
                 SpawnOneCarPerRoad();
             }
+            float PhaseLimit() const {
+                if (phase == 8) {
+                    if (automatic_signals) {
+                        return AutomaticWalkLimit();
+                    }
+                    return config::Static_red_s;
+                }
+                if (phase % 2 == 0) {
+                    if (automatic_signals) {
+                        return AutomaticGreenLimit();
+                    }
+                    return config::Green_s;
+                }
+                if (automatic_signals) {
+                    return config::Automatic_yellow_s;
+                }
+                return config::Yellow_s;
+            }
+
             void Update(float dt) {
+                float left = PhaseLimit() - phase_time;
+                if (left < 0.0f) {
+                    left = 0.0f;
+                }
+                for (int i = 0; i < lights.size(); i++) {
+                    lights[i].SetRemain(left);
+                }
                 for(int i = 0;i < roads.size();i++) {
                     roads[i]->Update(dt);
                 }
@@ -1418,7 +1809,7 @@ namespace obj {
             const obj::Crossroad* Get_crossroad() {
                 return crossroad;
             };
-            ~World() {
+            ~World() {  
                 for (int i = 0; i < walks.size(); ++i) {
                     walks[i].Clear();
                 }

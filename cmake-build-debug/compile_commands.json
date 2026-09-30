@@ -1,0 +1,20 @@
+[
+{
+  "directory": "/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/cmake-build-debug",
+  "command": "/usr/bin/c++ -DIMGUI_USER_CONFIG=\\\"imconfig-SFML.h\\\" -isystem /opt/homebrew/include -iframework /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks -g -std=gnu++17 -arch arm64 -fcolor-diagnostics -o CMakeFiles/app.dir/main.cpp.o -c /Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/main.cpp",
+  "file": "/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/main.cpp",
+  "output": "/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/cmake-build-debug/CMakeFiles/app.dir/main.cpp.o"
+},
+{
+  "directory": "/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/cmake-build-debug",
+  "command": "/usr/bin/c++ -DIMGUI_USER_CONFIG=\\\"imconfig-SFML.h\\\" -isystem /opt/homebrew/include -iframework /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks -g -std=gnu++17 -arch arm64 -fcolor-diagnostics -o CMakeFiles/app.dir/app.cpp.o -c /Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/app.cpp",
+  "file": "/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/app.cpp",
+  "output": "/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/cmake-build-debug/CMakeFiles/app.dir/app.cpp.o"
+},
+{
+  "directory": "/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/cmake-build-debug",
+  "command": "/usr/bin/c++ -DIMGUI_USER_CONFIG=\\\"imconfig-SFML.h\\\" -isystem /opt/homebrew/include -iframework /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks -g -std=gnu++17 -arch arm64 -fcolor-diagnostics -o CMakeFiles/app.dir/objects.cpp.o -c /Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/objects.cpp",
+  "file": "/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/objects.cpp",
+  "output": "/Users/danilamalyshev/CLionProjects/Drunken-driver-simulator/cmake-build-debug/CMakeFiles/app.dir/objects.cpp.o"
+}
+]

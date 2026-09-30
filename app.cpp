@@ -110,16 +110,22 @@ void app::run() {
             }
             if (ImGui::Button("Add car")) {
                 const std::vector<obj::Road*>& roads = World.Get_roads();
-                for (int r = 0; r < roads.size(); ++r) {
-                    const std::vector<obj::Lane*>& lanes = roads[r]->GetLanes();
-                    int inbound = lanes.size() / 2;
-                    for (int i = 0; i < inbound; ++i) {
-                        obj::Lane* lane = lanes[i];
-                        if (lane == nullptr || !lane->HasRoom()) {
-                            continue;
+                if (roads.size() > 0) {
+                    obj::Road* road = roads[Gen(0, roads.size() - 1)];
+                    if (road != nullptr) {
+                        const std::vector<obj::Lane*>& lanes = road->GetLanes();
+                        int inbound = lanes.size() / 2;
+                        if (inbound > 0) {
+                            int lane_start = Gen(0, inbound - 1);
+                            for (int j = 0; j < inbound; ++j) {
+                                obj::Lane* lane = lanes[(lane_start + j) % inbound];
+                                if (lane == nullptr || !lane->HasRoom()) {
+                                    continue;
+                                }
+                                lane->Car_push(new obj::Car(lane));
+                                break;
+                            }
                         }
-                        obj::Car* new_car = new obj::Car(lane);
-                        lane->Car_push(new_car);
                     }
                 }
             }
