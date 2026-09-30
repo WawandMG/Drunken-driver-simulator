@@ -3,8 +3,7 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
-#include <ctime>
-#include <memory>
+
 
 using namespace std;
  // ВВ нам за это жопу сломает, пока оставлю, но сам буду писать с std::. Если тебе норм, рекомендую убрать
@@ -15,6 +14,8 @@ inline int Gen(int l, int r) {// генератор рандомного цел�
     uniform_int_distribution<int> dist(l, r);
     return dist(rnd);
 }
+
+
 
 inline float GenFloat(float l, float r) {
     uniform_real_distribution<float> dist(l, r);
@@ -842,7 +843,7 @@ namespace obj {
             float along_px = -((hold.x - Pos.x) * away.x + (hold.y - Pos.y) * away.y);
             along_m = along_px / config::Pixels_to_meter;
         }
-        if (waypoint_i >= stop_i && lane->GetLight() != nullptr && have_hold) {
+        if (have_hold && lane->GetLight() != nullptr) {
             float speed_m = Speed / 3.6f;
             float brake_a = 40.0f / 3.6f;
             float stop_need = 0.0f;
@@ -856,36 +857,44 @@ namespace obj {
             bool stop_on_zebra = nose_if_stop < config::Crossing_dist_m + 0.4f;
             float nose_now = config::Stop_dist_m + along_m;
             bool already_on_zebra = nose_now < config::Crossing_dist_m + 0.3f && nose_now > 9.0f;
+            // ещё не въехали на зебру: даже после стоп-линии на красном надо встать
+            bool still_before_zebra = nose_now > config::Crossing_dist_m + 0.4f;
+            if (waypoint_i >= stop_i || still_before_zebra) {
+                Signal sig = lane->CurrentSignal();
+                bool my_green = false;
+                bool my_yellow = false;
+                if (turn == 2) {
+                    my_green = sig == Signal::GreenLeft;
+                    my_yellow = sig == Signal::YellowLeft;
+                } else {
+                    my_green = sig == Signal::Green;
+                    my_yellow = sig == Signal::Yellow;
+                }
 
-            Signal sig = lane->CurrentSignal();
-            bool my_green = false;
-            bool my_yellow = false;
-            if (turn == 2) {
-                my_green = sig == Signal::GreenLeft;
-                my_yellow = sig == Signal::YellowLeft;
-            } else {
-                my_green = sig == Signal::Green;
-                my_yellow = sig == Signal::Yellow;
-            }
-
-            float remain = lane->LightRemain();
-            float time_clear = (along_m + 14.0f) / (speed_m > 3.0f ? speed_m : 3.0f);
-            bool go = false;
-            if (already_on_zebra || (stop_on_zebra && speed_m > 0.8f)) {
-                go = true;
-            } else if (my_green && remain > t_stop + 0.6f && remain >= time_clear) {
-                go = true;
-            }
-            if (!go) {
-                wait = true;
-            }
-            if (!stop_on_zebra && !already_on_zebra) {
-                if (turn == 2 && lane->YieldNow()) {
+                float remain = lane->LightRemain();
+                float time_clear = (along_m + 14.0f) / (speed_m > 3.0f ? speed_m : 3.0f);
+                bool go = false;
+                // красный, в том числе фаза пешеходов: едем только если уже на зебре
+                if (already_on_zebra) {
+                    go = true;
+                } else if (!my_green && !my_yellow) {
+                    go = false;
+                } else if (my_yellow && stop_on_zebra && speed_m > 0.8f) {
+                    go = true;
+                } else if (my_green && remain > t_stop + 0.6f && remain >= time_clear) {
+                    go = true;
+                }
+                if (!go) {
                     wait = true;
                 }
-                Lane* exit = my_exit ? my_exit : lane->GetExit();
-                if (lane->ExitBlocked(exit)) {
-                    wait = true;
+                if (!stop_on_zebra && !already_on_zebra) {
+                    if (turn == 2 && lane->YieldNow()) {
+                        wait = true;
+                    }
+                    Lane* exit = my_exit ? my_exit : lane->GetExit();
+                    if (lane->ExitBlocked(exit)) {
+                        wait = true;
+                    }
                 }
             }
         }
@@ -898,6 +907,56 @@ namespace obj {
             }
             if (cap < target) {
                 target = cap;
+            }
+        }
+        // к стоп-линии едем и на красном. уступаем только у линии и до начала дуги,
+        // иначе правый поворот цепляет машину из соседнего ряда
+        float my_rad = std::sqrt(Pos.x * Pos.x + Pos.y * Pos.y);
+        bool near_turn = along_m < 8.0f && along_m > -14.0f && my_rad > Meters_to_Px(11.0f);
+        if (turn == 0 && near_turn && lane->LeftLane() != nullptr) {
+            sf::Vector2f forward(-away.x, -away.y);
+            const std::vector<Car*>& side_cars = lane->LeftLane()->GetCars();
+            for (int i = 0; i < side_cars.size(); i++) {
+                Car* other = side_cars[i];
+                if (!other || !other->IsAlive()) {
+                    continue;
+                }
+                sf::Vector2f rel = other->GetPos() - Pos;
+                float along = rel.x * forward.x + rel.y * forward.y;
+                float other_rad = std::sqrt(
+                    other->GetPos().x * other->GetPos().x +
+                    other->GetPos().y * other->GetPos().y);
+                bool beside = along > -Meters_to_Px(6.0f) && along < Meters_to_Px(12.0f);
+                bool in_box = other_rad < Meters_to_Px(24.0f) && along > -Meters_to_Px(4.0f);
+                if (beside || in_box) {
+                    target = 0.0f;
+                    wait = true;
+                    break;
+                }
+            }
+        }
+        // если правый уже крутит дугу впереди, не догоняем его
+        if (turn == 1 && along_m < 18.0f && along_m > -16.0f && lane->RightLane() != nullptr) {
+            sf::Vector2f forward(-away.x, -away.y);
+            const std::vector<Car*>& side_cars = lane->RightLane()->GetCars();
+            for (int i = 0; i < side_cars.size(); i++) {
+                Car* other = side_cars[i];
+                if (!other || !other->IsAlive() || other->Turn() != 0) {
+                    continue;
+                }
+                float other_rad = std::sqrt(
+                    other->GetPos().x * other->GetPos().x +
+                    other->GetPos().y * other->GetPos().y);
+                if (other_rad > Meters_to_Px(14.0f)) {
+                    continue;
+                }
+                sf::Vector2f rel = other->GetPos() - Pos;
+                float along = rel.x * forward.x + rel.y * forward.y;
+                if (along > -Meters_to_Px(2.0f) && along < Meters_to_Px(18.0f)) {
+                    if (other->Speed < target) {
+                        target = other->Speed;
+                    }
+                }
             }
         }
 
@@ -1003,7 +1062,14 @@ namespace obj {
         if (ahead) {
             float d = get_distance(Pos, ahead->Pos);
             if (d < gap) {
-                if (d > 0.0f) {
+                // на подъезде отодвигаем только вдоль дороги, иначе машина встаёт боком
+                if (waypoint_i >= stop_i) {
+                    sf::Vector2f forward(-away.x, -away.y);
+                    float along = (ahead->Pos.x - Pos.x) * forward.x + (ahead->Pos.y - Pos.y) * forward.y;
+                    if (along < gap) {
+                        Pos = Pos - forward * (gap - along);
+                    }
+                } else if (d > 0.0f) {
                     sf::Vector2f back = Pos - ahead->Pos;
                     Pos = ahead->Pos + back * (gap / d);
                 } else {
@@ -1511,7 +1577,12 @@ namespace obj {
                     float inner = Meters_to_Px(7.0f);
                     sf::Vector2f enter = lane->GetOffset() + lane->GetOutward() * inner;
                     sf::Vector2f leave = exit_lane->GetOffset() + exit_dir * inner;
+                    // правый поворот огибает угол. левый идёт по своей стороне,
+                    // иначе встречный левый проходит сквозь корпус
                     sf::Vector2f corner = lane->GetOffset() + exit_lane->GetOffset();
+                    if (maneuver == Lane::Maneuver::Left) {
+                        corner = (enter + leave) * 0.5f;
+                    }
                     travel.push_back(enter);
                     for (int s = 1; s <= 3; s++) {
                         float t = (float)s / 4.0f;
@@ -1786,4 +1857,3 @@ namespace obj {
     };
 
 }
-
