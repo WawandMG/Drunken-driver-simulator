@@ -68,7 +68,7 @@ void app::run() {
             float min_speed = config::Vehicle_speed_min_kmh;
             if (ImGui::SliderFloat(
                     "Minimum car speed (km/h)", &min_speed,
-                    5.0f, 160.0f, "%.0f")) {
+                    5.0f, 120.0f, "%.0f")) {
                 config::Vehicle_speed_min_kmh = min_speed;
                 if (config::Vehicle_speed_max_kmh < min_speed) {
                     config::Vehicle_speed_max_kmh = min_speed;
@@ -79,17 +79,6 @@ void app::run() {
                 config::Vehicle_speed_min_kmh, 160.0f, "%.0f");
 
             float min_arrival = config::Car_arrival_min_s;
-            if (ImGui::SliderFloat(
-                    "Minimum spawn interval (s)", &min_arrival,
-                    1.0f, 30.0f, "%.1f")) {
-                config::Car_arrival_min_s = min_arrival;
-                if (config::Car_arrival_max_s < min_arrival) {
-                    config::Car_arrival_max_s = min_arrival;
-                }
-            }
-            ImGui::SliderFloat(
-                "Maximum spawn interval (s)", &config::Car_arrival_max_s,
-                config::Car_arrival_min_s, 60.0f, "%.1f");
             ImGui::TextWrapped(
                 "Each randomized arrival cycle adds one car to every road.");
 
@@ -99,28 +88,7 @@ void app::run() {
             if (World.AutomaticSignals()) {
                 ImGui::Text("Pedestrians waiting: %d",
                     World.WaitingPedestrians());
-            }
-            if (ImGui::Button("Add car")) {
-                const std::vector<obj::Road*>& roads = World.Get_roads();
-                if (roads.size() > 0) {
-                    obj::Road* road = roads[Gen(0, roads.size() - 1)];
-                    if (road != nullptr) {
-                        const std::vector<obj::Lane*>& lanes = road->GetLanes();
-                        int inbound = lanes.size() / 2;
-                        if (inbound > 0) {
-                            int lane_start = Gen(0, inbound - 1);
-                            for (int j = 0; j < inbound; ++j) {
-                                obj::Lane* lane = lanes[(lane_start + j) % inbound];
-                                if (lane == nullptr || !lane->HasRoom()) {
-                                    continue;
-                                }
-                                lane->Car_push(new obj::Car(lane));
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
+            } 
             if (ImGui::Button("Next background")) {
                 Back.Next_background(Background);
 

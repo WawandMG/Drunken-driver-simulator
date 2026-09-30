@@ -204,8 +204,8 @@ namespace obj {
             bool IsAlive() const { return alive; }
 
             Pedestrian() {
-                SetSpeedLimit(5);
-                SetSpeed(5);
+                SetSpeedLimit(30);
+                SetSpeed(20);
                 SetAcceleration(8);
             }
 
