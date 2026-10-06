@@ -25,7 +25,7 @@ inline float GenFloat(float l, float r) {
 
 namespace config {
     inline const float Pixels_to_meter = 8.0f;
-    
+
     inline const float Lane_width_m = 3.5f;   // _m - метры
     inline const float Car_length_m = 4.5f;
     inline const float Car_width_m = 1.8f;
@@ -81,6 +81,7 @@ namespace obj {
     inline float Km_to_Px(float kmh) {
         return kmh * 1000.0f * config::Pixels_to_meter / 3600.0f;
     }
+    inline const float Pedestrian_speed_px_s = 11.0f;
     // Родительский класс динамичных объектов
     class Entity {
         protected:
@@ -117,6 +118,7 @@ namespace obj {
 
             // Получить лимит скорости объекта
             float GetSpeedLimit() const { return Speed_limit; }
+            float GetSpeed() const { return Speed; }
 
             //установка лимита скорости
             void SetSpeedLimit(float x) { Speed_limit = x; }
@@ -204,8 +206,8 @@ namespace obj {
             bool IsAlive() const { return alive; }
 
             Pedestrian() {
-                SetSpeedLimit(30);
-                SetSpeed(20);
+                SetSpeedLimit(Pedestrian_speed_px_s * 1.5f);
+                SetSpeed(Pedestrian_speed_px_s);
                 SetAcceleration(8);
             }
 
@@ -225,12 +227,12 @@ namespace obj {
                     return;
                 }
                 if (waypoint_i >= waypoints.size()) {
-                    waypoint_i = waypoints.size() - 1;
+                    waypoint_i = int(waypoints.size()) - 1;
                 }
                 Direction = waypoints[waypoint_i] - Pos;
                 NormalizeDirection();
                 float dist = get_distance(Pos, waypoints[waypoint_i]);
-                float step = Km_to_Px(Speed) * dt;
+                float step = Speed * dt;
                 if (step >= dist) {
                     Pos = waypoints[waypoint_i];
                     waypoint_i--;
@@ -259,7 +261,7 @@ namespace obj {
     class Lane {
         private:
             sf::Vector2f corners[4]; // 4 угла полосы для отрисовки
-            
+
             config::direction Direction;
             /*
             После Connect маршрут лежит наоборот ходу машины:
@@ -781,7 +783,12 @@ namespace obj {
             }
         }
         int stop_i = own_stop >= 0 ? own_stop : lane->StopIndex();
-        
+        // фикс выезда за перекресток на красный и на пешеходник
+        if (stop_i < 0 || stop_i >= (int)waypoints.size()) {
+            stop_i = 1;
+            own_stop = -1; 
+        }
+
         sf::Vector2f away = lane->GetOutward();
         float nose_px = Meters_to_Px(config::Car_length_m * 0.5f);
         sf::Vector2f hold(0.0f, 0.0f);
@@ -803,6 +810,10 @@ namespace obj {
                 ? lane->GetWaypoints().size()
                 : other->own_route.size();
             int his_stop = other->own_stop >= 0 ? other->own_stop : lane->StopIndex();
+            
+            if (his_stop < 0 || his_stop >= his_n) {
+                his_stop = 1;
+            }
             int his_prog = his_n - 1 - other->waypoint_i;
             bool him_before = other->waypoint_i >= his_stop;
             bool in_front = false;
@@ -1031,7 +1042,8 @@ namespace obj {
                 if (ahead->own_route.size() > 0) {
                     ahead_n = ahead->own_route.size();
                 }
-                if (ahead_n == waypoints.size() && waypoint_i - 1 < ahead->waypoint_i) {
+                // корретное сравнение
+                if (ahead_n == waypoints.size() && waypoint_i <= ahead->waypoint_i) {
                     break;
                 }
             }
@@ -1845,7 +1857,7 @@ namespace obj {
             const obj::Crossroad* Get_crossroad() {
                 return crossroad;
             };
-            ~World() {  
+            ~World() {
                 for (int i = 0; i < walks.size(); ++i) {
                     walks[i].Clear();
                 }
