@@ -555,8 +555,17 @@ namespace obj {
         if (!target) {
             return -1.0f;
         }
-        float behind = Meters_to_Px(10.0f);
-        float ahead_need = Meters_to_Px(14.0f);
+        float slide_s = config::Lane_width_m / 8.0f;
+        float ahead_m = Speed / 3.6f * slide_s + config::Car_length_m + 4.0f;
+        if (ahead_m < 14.0f) {
+            ahead_m = 14.0f;
+        }
+        float behind_m = Speed / 3.6f * 0.6f;
+        if (behind_m < 10.0f) {
+            behind_m = 10.0f;
+        }
+        float behind = Meters_to_Px(behind_m);
+        float ahead_need = Meters_to_Px(ahead_m);
         float nearest = Meters_to_Px(80.0f);
         const std::vector<Car*>& queue = target->GetCars();
         for (int i = 0; i < queue.size(); i++) {
@@ -743,7 +752,8 @@ namespace obj {
         sf::Vector2f side_dir(side.x / lat, side.y / lat);
         Pos += forward * forward_step;
         Pos += side_dir * side_step;
-        Direction = forward * forward_step + side_dir * side_step;
+        // нос почти по ряду, небольшой доворот, а не диагональ
+        Direction = forward * 5.0f + side_dir;
         NormalizeDirection();
     }
 
@@ -775,13 +785,6 @@ namespace obj {
         float target = Speed_limit;
         float gap = Meters_to_Px(config::Car_length_m + 2.0f);
         const std::vector<Car*>& queue = lane->GetCars();
-        int my_place = -1;
-        for (int i = 0; i < queue.size(); ++i) {
-            if (queue[i] == this) {
-                my_place = i;
-                break;
-            }
-        }
         int stop_i = own_stop >= 0 ? own_stop : lane->StopIndex();
         // фикс выезда за перекресток на красный и на пешеходник
         if (stop_i < 0 || stop_i >= (int)waypoints.size()) {
@@ -799,6 +802,11 @@ namespace obj {
         }
         int my_prog = waypoints.size() - 1 - waypoint_i;
         bool me_before = waypoint_i >= stop_i;
+        sf::Vector2f fwd(-away.x, -away.y);
+        float dlen = std::sqrt(Direction.x * Direction.x + Direction.y * Direction.y);
+        if (dlen > 0.2f) {
+            fwd = sf::Vector2f(Direction.x / dlen, Direction.y / dlen);
+        }
         Car* ahead = nullptr;
         float ahead_d = 0.0f;
         for (int i = 0; i < queue.size(); ++i) {
@@ -821,7 +829,8 @@ namespace obj {
                 if (his_prog > my_prog) {
                     in_front = true;
                 } else if (his_prog == my_prog) {
-                    in_front = i < my_place;
+                    float along = (other->Pos.x - Pos.x) * fwd.x + (other->Pos.y - Pos.y) * fwd.y;
+                    in_front = along > 0.0f;
                 }
             }
             if (!in_front) {
@@ -831,6 +840,26 @@ namespace obj {
             if (!ahead || d < ahead_d) {
                 ahead = other;
                 ahead_d = d;
+            }
+        }
+        sf::Vector2f forward_road(-away.x, -away.y);
+        for (int i = 0; i < queue.size(); ++i) {
+            Car* other = queue[i];
+            if (!other || other == this || !other->IsAlive()) {
+                continue;
+            }
+            sf::Vector2f rel = other->Pos - Pos;
+            float along = rel.x * forward_road.x + rel.y * forward_road.y;
+            float lat = std::fabs(rel.x * (-away.y) + rel.y * away.x);
+            if (lat > Meters_to_Px(config::Lane_width_m * 0.8f)) {
+                continue;
+            }
+            if (along <= Meters_to_Px(0.5f)) {
+                continue;
+            }
+            if (!ahead || along < ahead_d) {
+                ahead = other;
+                ahead_d = along;
             }
         }
         if (ahead) {
@@ -854,7 +883,13 @@ namespace obj {
             float along_px = -((hold.x - Pos.x) * away.x + (hold.y - Pos.y) * away.y);
             along_m = along_px / config::Pixels_to_meter;
         }
-        if (have_hold && lane->GetLight() != nullptr) {
+        float see_m = config::Signal_visibility_m;
+        float speed_now = Speed / 3.6f;
+        float brake_need = speed_now * speed_now / (2.0f * (40.0f / 3.6f)) + 6.0f;
+        if (brake_need > see_m) {
+            see_m = brake_need;
+        }
+        if (have_hold && lane->GetLight() != nullptr && along_m <= see_m) {
             float speed_m = Speed / 3.6f;
             float brake_a = 40.0f / 3.6f;
             float stop_need = 0.0f;
@@ -883,7 +918,13 @@ namespace obj {
                 }
 
                 float remain = lane->LightRemain();
-                float time_clear = (along_m + 14.0f) / (speed_m > 3.0f ? speed_m : 3.0f);
+                float clear_dist = along_m + 14.0f;
+                // уже стоит у линии и это не правый поворот: хватает короткого зелёного,
+                // правый не отпускаем раньше, иначе он врежется в быстрый прямой ряд
+                if (turn != 0 && speed_m < 1.0f && along_m < 2.0f && clear_dist > 8.0f) {
+                    clear_dist = 8.0f;
+                }
+                float time_clear = clear_dist / (speed_m > 3.0f ? speed_m : 3.0f);
                 bool go = false;
                 // красный, в том числе фаза пешеходов: едем только если уже на зебре
                 if (already_on_zebra) {
@@ -909,7 +950,7 @@ namespace obj {
                 }
             }
         }
-        if (wait) {
+        if (wait && along_m >= -0.4f) {
             float usable = along_m - 0.3f;
             float cap = 0.0f;
             if (usable > 0.3f) {
@@ -919,12 +960,12 @@ namespace obj {
             if (cap < target) {
                 target = cap;
             }
+        } else if (along_m < -4.0f) {
+            // глубоко в перекрёстке уже не возвращаем на линию
+            wait = false;
         }
-        // к стоп-линии едем и на красном. уступаем только у линии и до начала дуги,
-        // иначе правый поворот цепляет машину из соседнего ряда
-        float my_rad = std::sqrt(Pos.x * Pos.x + Pos.y * Pos.y);
-        bool near_turn = along_m < 8.0f && along_m > -14.0f && my_rad > Meters_to_Px(11.0f);
-        if (turn == 0 && near_turn && lane->LeftLane() != nullptr) {
+        // у линии правый поворот ждёт, пока соседний ряд не освободит перекрёсток
+        if (turn == 0 && along_m > -0.5f && along_m < 70.0f && lane->LeftLane() != nullptr) {
             sf::Vector2f forward(-away.x, -away.y);
             const std::vector<Car*>& side_cars = lane->LeftLane()->GetCars();
             for (int i = 0; i < side_cars.size(); i++) {
@@ -937,17 +978,29 @@ namespace obj {
                 float other_rad = std::sqrt(
                     other->GetPos().x * other->GetPos().x +
                     other->GetPos().y * other->GetPos().y);
-                bool beside = along > -Meters_to_Px(6.0f) && along < Meters_to_Px(12.0f);
-                bool in_box = other_rad < Meters_to_Px(24.0f) && along > -Meters_to_Px(4.0f);
-                if (beside || in_box) {
-                    target = 0.0f;
-                    wait = true;
-                    break;
+                bool beside = along > -Meters_to_Px(25.0f) && along < Meters_to_Px(18.0f);
+                bool in_box = other_rad < Meters_to_Px(22.0f) && along > -Meters_to_Px(4.0f);
+                if (!beside && !in_box) {
+                    continue;
                 }
+                wait = true;
+                if (along_m < 8.0f) {
+                    target = 0.0f;
+                } else {
+                    float usable = along_m - 0.3f;
+                    float cap = 0.0f;
+                    if (usable > 0.3f) {
+                        float a = 40.0f / 3.6f;
+                        cap = std::sqrt(2.0f * a * usable) * 3.6f;
+                    }
+                    if (cap < target) {
+                        target = cap;
+                    }
+                }
+                break;
             }
         }
-        // если правый уже крутит дугу впереди, не догоняем его
-        if (turn == 1 && along_m < 18.0f && along_m > -16.0f && lane->RightLane() != nullptr) {
+        if (turn == 1 && along_m < 28.0f && along_m > 0.4f && lane->RightLane() != nullptr) {
             sf::Vector2f forward(-away.x, -away.y);
             const std::vector<Car*>& side_cars = lane->RightLane()->GetCars();
             for (int i = 0; i < side_cars.size(); i++) {
@@ -955,15 +1008,18 @@ namespace obj {
                 if (!other || !other->IsAlive() || other->Turn() != 0) {
                     continue;
                 }
+                if (other->Speed < 5.0f) {
+                    continue;
+                }
                 float other_rad = std::sqrt(
                     other->GetPos().x * other->GetPos().x +
                     other->GetPos().y * other->GetPos().y);
-                if (other_rad > Meters_to_Px(14.0f)) {
+                if (other_rad > Meters_to_Px(26.0f)) {
                     continue;
                 }
                 sf::Vector2f rel = other->GetPos() - Pos;
                 float along = rel.x * forward.x + rel.y * forward.y;
-                if (along > -Meters_to_Px(2.0f) && along < Meters_to_Px(18.0f)) {
+                if (along > Meters_to_Px(0.5f) && along < Meters_to_Px(22.0f)) {
                     if (other->Speed < target) {
                         target = other->Speed;
                     }
@@ -992,7 +1048,22 @@ namespace obj {
         if (aim.x * aim.x + aim.y * aim.y < 0.01f && waypoint_i > 0) {
             aim = waypoints[waypoint_i - 1] - waypoints[waypoint_i];
         }
-        if (aim.x != 0.0f || aim.y != 0.0f) {
+        bool on_straight = false;
+        if (waypoint_i + 1 < waypoints.size()) {
+            sf::Vector2f seg = waypoints[waypoint_i] - waypoints[waypoint_i + 1];
+            float sl = std::sqrt(seg.x * seg.x + seg.y * seg.y);
+            if (sl > 1.0f) {
+                seg.x /= sl;
+                seg.y /= sl;
+                bool axis = std::fabs(seg.x) > 0.92f || std::fabs(seg.y) > 0.92f;
+                float rad = std::sqrt(Pos.x * Pos.x + Pos.y * Pos.y);
+                if (axis && rad > Meters_to_Px(config::Crossing_dist_m + 1.0f)) {
+                    Direction = seg;
+                    on_straight = true;
+                }
+            }
+        }
+        if (!on_straight && (aim.x != 0.0f || aim.y != 0.0f)) {
             Direction = aim;
             NormalizeDirection();
         }
@@ -1010,8 +1081,8 @@ namespace obj {
         Velocity = Direction * Km_to_Px(Speed);
         if (wait && have_hold) {
             float along_px = -((hold.x - Pos.x) * away.x + (hold.y - Pos.y) * away.y);
-            if (along_px <= step) {
-                if (along_px > -Meters_to_Px(1.5f)) {
+            if (along_px <= step || along_px < 0.0f) {
+                if (along_px > -Meters_to_Px(4.0f)) {
                     Pos = hold;
                     Speed = 0.0f;
                     step = 0.0f;
@@ -1061,6 +1132,19 @@ namespace obj {
             }
         }
 
+        if (waypoint_i + 1 < waypoints.size() && waypoint_i >= 0) {
+            sf::Vector2f seg = waypoints[waypoint_i] - waypoints[waypoint_i + 1];
+            float sl = std::sqrt(seg.x * seg.x + seg.y * seg.y);
+            float rad = std::sqrt(Pos.x * Pos.x + Pos.y * Pos.y);
+            if (sl > 1.0f && rad > Meters_to_Px(config::Crossing_dist_m + 1.0f)) {
+                seg.x /= sl;
+                seg.y /= sl;
+                if (std::fabs(seg.x) > 0.92f || std::fabs(seg.y) > 0.92f) {
+                    Direction = seg;
+                }
+            }
+        }
+
         if (waypoint_i < 0) {
             alive = false;
             if (lane) {
@@ -1078,7 +1162,7 @@ namespace obj {
                 if (waypoint_i >= stop_i) {
                     sf::Vector2f forward(-away.x, -away.y);
                     float along = (ahead->Pos.x - Pos.x) * forward.x + (ahead->Pos.y - Pos.y) * forward.y;
-                    if (along < gap) {
+                    if (along > 0.0f && along < gap) {
                         Pos = Pos - forward * (gap - along);
                     }
                 } else if (d > 0.0f) {
@@ -1112,6 +1196,12 @@ namespace obj {
                     continue;
                 }
                 sf::Vector2f p = car->GetPos();
+                // уже за точкой пересечения и едет дальше — путь свободен
+                sf::Vector2f travel = -other->GetOutward();
+                float past = p.x * travel.x + p.y * travel.y;
+                if (past > Meters_to_Px(9.0f) && car->GetSpeed() > 5.0f) {
+                    continue;
+                }
                 float dist = std::sqrt(p.x * p.x + p.y * p.y);
                 if (dist < limit) {
                     return true;
@@ -1653,7 +1743,9 @@ namespace obj {
                             lane->SetRoute(route, stop_index);
 
                             const std::vector<Lane*>& oncoming = roads[opposite[r]]->GetLanes();
-                            for (int k = 1; k <= n - 2; ++k) {
+                            // только встречные прямые ряды. выезжающие с перекрёстка
+                            // уже не пересекают левый поворот
+                            for (int k = 1; k < n / 2 - 1; ++k) {
                                 lane->AddYield(oncoming[k]);
                             }
                         } else if (i == 0) {
